@@ -4,14 +4,15 @@ import {
   AnimatePresence,
   MotionConfig,
   motion,
-  useReducedMotion,
 } from "motion/react";
 import {
   ArrowCounterClockwise,
   ArrowRight,
+  ArrowSquareOut,
   BookmarkSimple,
   CalendarBlank,
   CaretDown,
+  ChatCircleDots,
   CheckCircle,
   Clock,
   Compass,
@@ -31,28 +32,34 @@ import {
 } from "@phosphor-icons/react";
 import { AuthDialog } from "./AuthDialog.jsx";
 import { categories, events, initialPreferences, nearbyAreas } from "./data.js";
+import { askGuide } from "./lib/guide-client.js";
 import { isSupabaseConfigured, supabase } from "./lib/supabase.js";
 
 const initialGuideMessages = [
   {
-    id: "welcome-user",
-    role: "user",
-    text: "I’m 16, in the Mission, free this weekend, and can spend up to $20.",
-  },
-  {
-    id: "welcome-assistant",
+    id: "welcome",
     role: "assistant",
-    summary: "Here are 3 weekend events that match your request.",
-    eventIds: events.map((event) => event.id),
-    question: "Confirmed eligibility or strongest AI focus?",
+    summary:
+      "I can compare the verified events in this catalog without inventing missing details.",
+    eventIds: [],
+    caveat:
+      "Every listed organizer currently leaves its age or minor-admission policy unpublished.",
+    question: "Ask about this weekend, a topic, travel, or registration type.",
+    providerLabel: "Verified catalog",
+    model: "ready",
   },
 ];
 
 const quickPrompts = [
-  "Confirmed eligibility only",
-  "Compare robotics and AI",
-  "Show me a no-match example",
+  "What can I do this weekend?",
+  "Which event is most hands-on?",
+  "Confirmed age eligibility only",
 ];
+
+const initialGuideStatus = {
+  phase: "idle",
+  text: "Ready to search the verified catalog",
+};
 
 function useStoredArray(key) {
   const [value, setValue] = useState(() => {
@@ -73,85 +80,6 @@ function useStoredArray(key) {
   }, [key, value]);
 
   return [value, setValue];
-}
-
-function getGuideReply(rawPrompt) {
-  const prompt = rawPrompt.toLowerCase();
-
-  if (
-    prompt.includes("no-match") ||
-    prompt.includes("no match") ||
-    prompt.includes("outdoor") ||
-    prompt.includes("concert tonight") ||
-    prompt.includes("berkeley only")
-  ) {
-    return {
-      role: "assistant",
-      summary: "I couldn’t find a catalog event that satisfies every constraint.",
-      eventIds: [],
-      caveat:
-        "The limiting constraint is the event type or location. I kept your age, weekend, and $20 budget rules intact.",
-      question: "Relax location to SF + Bay Area or keep the current constraints?",
-      noMatch: true,
-    };
-  }
-
-  if (prompt.includes("compare")) {
-    return {
-      role: "assistant",
-      summary:
-        "The robotics lab is the safer practical choice; the AI workshop is the closer topic match.",
-      eventIds: ["evt-robotics-0725", "evt-ai-0726"],
-      caveat:
-        "Only the robotics lab publishes a confirmed teen age range. The AI workshop’s eligibility is unknown.",
-      question: "Prioritize confirmed eligibility or direct AI experience?",
-    };
-  }
-
-  if (
-    prompt.includes("confirmed") ||
-    prompt.includes("teen") ||
-    prompt.includes("age")
-  ) {
-    return {
-      role: "assistant",
-      summary: "One current catalog event has confirmed teen eligibility.",
-      eventIds: ["evt-robotics-0725"],
-      caveat:
-        "The other two remain visible in Browse, but I excluded them here because their age policies are not published.",
-      question: "Keep confirmed eligibility as a hard constraint?",
-    };
-  }
-
-  if (prompt.includes("ai") || prompt.includes("artificial intelligence")) {
-    return {
-      role: "assistant",
-      summary: "Two catalog events have a direct AI or robotics learning fit.",
-      eventIds: ["evt-ai-0726", "evt-robotics-0725"],
-      caveat:
-        "The AI workshop is under budget, but its minimum age is not listed.",
-      question: "Want the confirmed teen option first, or the strongest AI match?",
-    };
-  }
-
-  if (prompt.includes("free") || prompt.includes("cheapest")) {
-    return {
-      role: "assistant",
-      summary: "One event is confirmed free and fits the rest of your profile.",
-      eventIds: ["evt-robotics-0725"],
-      question: "Should I keep cost at $0 or include events up to $20?",
-    };
-  }
-
-  return {
-    role: "assistant",
-    summary:
-      "I checked your request against the three current records in this demo catalog.",
-    eventIds: events.map((event) => event.id),
-    caveat:
-      "I did not infer missing age details; two records still require organizer confirmation.",
-    question: "What matters most next: topic, eligibility, or travel time?",
-  };
 }
 
 function IconButton({ label, active = false, children, ...props }) {
@@ -240,7 +168,7 @@ function EventRow({
 
         <div className="event-badges">
           <span className="plain-badge">{event.costLabel}</span>
-          <span className="plain-badge">Beginner</span>
+          <span className="plain-badge">{event.audienceLabel}</span>
           <StatusBadge event={event} />
         </div>
 
@@ -253,9 +181,16 @@ function EventRow({
             )}
             {event.matchLabel}
           </span>
-          <span className="source-note">
+          <a
+            className="source-note"
+            href={event.sourceHref}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${event.title} on ${event.sourcePlatform}`}
+          >
             {event.source} · <em>{event.checked}</em>
-          </span>
+            <ArrowSquareOut size={14} aria-hidden="true" />
+          </a>
         </div>
       </div>
 
@@ -371,6 +306,12 @@ function GuideMessage({ message, onOpenEvent }) {
         ) : null}
 
         <p className="guide-question">{message.question}</p>
+        {message.providerLabel ? (
+          <span className="guide-provenance">
+            {message.providerLabel}
+            {message.model ? ` · ${message.model}` : ""}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -382,6 +323,8 @@ function GuidePanel({
   input,
   setInput,
   loading,
+  status,
+  eventCount,
   preferences,
   onSubmit,
   onPrompt,
@@ -416,7 +359,7 @@ function GuidePanel({
           </div>
           <p>
             <Database size={15} weight="bold" aria-hidden="true" />
-            3 catalog matches
+            {eventCount} verified source {eventCount === 1 ? "record" : "records"}
           </p>
         </div>
         {onClose ? (
@@ -444,7 +387,7 @@ function GuidePanel({
               <span />
               <span />
               <span />
-              <em>Checking the catalog…</em>
+              <em>{status.text}</em>
             </div>
           </div>
         ) : null}
@@ -495,7 +438,11 @@ function GuidePanel({
           <ArrowCounterClockwise size={16} aria-hidden="true" />
           Reset guide
         </button>
-        <p>Demo responses use only the 3 visible catalog records.</p>
+        <p className={`guide-service-status ${status.phase}`}>
+          {status.phase === "idle"
+            ? "AI answers are constrained to verified source records."
+            : status.text}
+        </p>
       </footer>
     </section>
   );
@@ -690,8 +637,17 @@ function EventDialog({
               <Database size={20} weight="bold" aria-hidden="true" />
               <span>
                 <strong>{event.source}</strong>
-                {event.checked} · Demo catalog record {event.id}
+                {event.checked} · Canonical event page
               </span>
+              <a
+                href={event.sourceHref}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Open ${event.title} on ${event.sourcePlatform}`}
+              >
+                Open on {event.sourcePlatform}
+                <ArrowSquareOut size={16} aria-hidden="true" />
+              </a>
             </div>
 
             <div className="event-dialog-actions">
@@ -745,8 +701,8 @@ function ExternalNoticeDialog({ event, open, onOpenChange }) {
           <Dialog.Title>You’re leaving Findr</Dialog.Title>
           <Dialog.Description>
             Organizer details are the authority for eligibility, availability,
-            and registration. This demo opens the source collection rather than
-            a live event checkout.
+            and registration. Findr will open this event’s canonical{" "}
+            {event.sourcePlatform} page.
           </Dialog.Description>
           <div className="external-event">
             <strong>{event.title}</strong>
@@ -765,7 +721,7 @@ function ExternalNoticeDialog({ event, open, onOpenChange }) {
               rel="noreferrer"
               onClick={() => onOpenChange(false)}
             >
-              Continue to source
+              Open on {event.sourcePlatform}
               <ArrowRight size={19} weight="bold" aria-hidden="true" />
             </a>
           </div>
@@ -775,7 +731,7 @@ function ExternalNoticeDialog({ event, open, onOpenChange }) {
   );
 }
 
-function DateRail({ origin, onOriginChange, onDataStatus }) {
+function DateRail({ origin, eventCount, onOriginChange, onDataStatus }) {
   const calendarDays = [
     "28",
     "29",
@@ -876,7 +832,7 @@ function DateRail({ origin, onOriginChange, onDataStatus }) {
         <CheckCircle size={20} weight="fill" aria-hidden="true" />
         <span>
           <strong>Catalog current</strong>
-          3 records checked today
+          {eventCount} real events verified Jul 23
         </span>
         <CaretDown size={16} aria-hidden="true" />
       </button>
@@ -885,7 +841,6 @@ function DateRail({ origin, onOriginChange, onDataStatus }) {
 }
 
 export function App() {
-  const reduceMotion = useReducedMotion();
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState("All");
@@ -900,6 +855,7 @@ export function App() {
   const [lastDismissed, setLastDismissed] = useState(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [guideDesktopOpen, setGuideDesktopOpen] = useState(true);
   const [activeEvent, setActiveEvent] = useState(null);
   const [externalEvent, setExternalEvent] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -908,9 +864,10 @@ export function App() {
   const [guideMessages, setGuideMessages] = useState(initialGuideMessages);
   const [guideInput, setGuideInput] = useState("");
   const [guideLoading, setGuideLoading] = useState(false);
+  const [guideStatus, setGuideStatus] = useState(initialGuideStatus);
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
-  const responseTimer = useRef(null);
+  const guideAbortRef = useRef(null);
 
   const preferences = {
     ...initialPreferences,
@@ -926,7 +883,7 @@ export function App() {
   useEffect(
     () => () => {
       window.clearTimeout(toastTimer.current);
-      window.clearTimeout(responseTimer.current);
+      guideAbortRef.current?.abort();
     },
     [],
   );
@@ -1119,7 +1076,7 @@ export function App() {
     setExternalEvent(event);
   };
 
-  const submitGuide = (prompt) => {
+  const submitGuide = async (prompt) => {
     if (guideLoading) return;
     const userMessage = {
       id: `user-${Date.now()}`,
@@ -1129,21 +1086,108 @@ export function App() {
     setGuideMessages((current) => [...current, userMessage]);
     setGuideInput("");
     setGuideLoading(true);
-    responseTimer.current = window.setTimeout(() => {
+    setGuideStatus({ phase: "retrieving", text: "Searching verified events…" });
+
+    const controller = new AbortController();
+    guideAbortRef.current = controller;
+    const history = guideMessages
+      .slice(-6)
+      .map((message) => ({
+        role: message.role,
+        content:
+          message.role === "user"
+            ? message.text
+            : [message.summary, message.caveat, message.question]
+                .filter(Boolean)
+                .join(" "),
+      }));
+
+    try {
+      const result = await askGuide(
+        {
+          query: prompt,
+          history,
+          preferences,
+          visibleEventIds: visibleEvents.map((event) => event.id),
+        },
+        {
+          signal: controller.signal,
+          onStatus: (status) => {
+            if (status.type === "retrieval") {
+              setGuideStatus({
+                phase: "retrieving",
+                text: `Grounded in ${status.events.length} verified ${status.events.length === 1 ? "event" : "events"}`,
+              });
+            } else if (status.type === "attempt") {
+              setGuideStatus({
+                phase: "connecting",
+                text: `Trying ${status.providerLabel}…`,
+              });
+            } else if (status.type === "alive") {
+              setGuideStatus({
+                phase: "responding",
+                text: `${status.providerLabel} is responding…`,
+              });
+            } else if (status.type === "fallback") {
+              setGuideStatus({
+                phase: "connecting",
+                text: `${status.providerLabel} did not finish; trying the next model…`,
+              });
+            }
+          },
+        },
+      );
       const reply = {
-        ...getGuideReply(prompt),
+        ...result.message,
         id: `assistant-${Date.now()}`,
+        provider: result.provider,
+        providerLabel: result.providerLabel,
+        model: result.model,
       };
       setGuideMessages((current) => [...current, reply]);
+      setGuideStatus({
+        phase: result.provider === "local" ? "degraded" : "ready",
+        text:
+          result.provider === "local"
+            ? "Live providers were unavailable · verified retrieval used"
+            : `${result.providerLabel} · ${result.model}`,
+      });
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        setGuideMessages((current) => [
+          ...current,
+          {
+            id: `assistant-error-${Date.now()}`,
+            role: "assistant",
+            summary: "The live concierge could not reach its local API.",
+            eventIds: [],
+            caveat:
+              "Event browsing and source links still work. This AI endpoint runs only in the local development demo until a production server function is deployed.",
+            question: "Try again after the local API reconnects?",
+            noMatch: true,
+            providerLabel: "Connection error",
+          },
+        ]);
+        setGuideStatus({
+          phase: "error",
+          text: "Live guide unavailable",
+        });
+      }
+    } finally {
+      if (guideAbortRef.current === controller) {
+        guideAbortRef.current = null;
+      }
       setGuideLoading(false);
-    }, reduceMotion ? 120 : 650);
+    }
   };
 
   const resetGuide = () => {
-    window.clearTimeout(responseTimer.current);
+    guideAbortRef.current?.abort();
+    guideAbortRef.current = null;
     setGuideLoading(false);
     setGuideMessages(initialGuideMessages);
     setGuideInput("");
+    setGuideStatus(initialGuideStatus);
     showToast("Findr guide reset");
   };
 
@@ -1153,7 +1197,9 @@ export function App() {
         Skip to event results
       </a>
 
-      <div className="app-shell">
+      <div
+        className={`app-shell${guideDesktopOpen ? "" : " guide-collapsed"}`}
+      >
         <header className="topbar">
           <button className="wordmark" type="button" onClick={resetFilters}>
             Findr
@@ -1198,6 +1244,19 @@ export function App() {
           </button>
 
           <button
+            className={`guide-toggle-control${guideDesktopOpen ? " is-active" : ""}`}
+            type="button"
+            onClick={() => setGuideDesktopOpen((current) => !current)}
+            aria-pressed={guideDesktopOpen}
+            aria-label={
+              guideDesktopOpen ? "Close Findr guide" : "Open Findr guide"
+            }
+          >
+            <ChatCircleDots size={20} weight="bold" aria-hidden="true" />
+            Guide
+          </button>
+
+          <button
             className="profile-button"
             type="button"
             onClick={() => setAuthOpen(true)}
@@ -1216,12 +1275,15 @@ export function App() {
 
         <DateRail
           origin={origin}
+          eventCount={events.length}
           onOriginChange={(nextOrigin) => {
             setOrigin(nextOrigin);
             showToast(`Travel origin changed to ${nextOrigin}`);
           }}
           onDataStatus={() =>
-            showToast("All 3 demo records were checked on Jul 23, 2026")
+            showToast(
+              `All ${events.length} events link to source pages verified Jul 23, 2026`,
+            )
           }
         />
 
@@ -1283,10 +1345,10 @@ export function App() {
                 <div>
                   <h2 id="results-heading">
                     {visibleEvents.length}{" "}
-                    {visibleEvents.length === 1 ? "match" : "matches"} for this
-                    weekend
+                    {visibleEvents.length === 1 ? "verified event" : "verified events"}{" "}
+                    coming up
                   </h2>
-                  <span>Sat, Jul 25–Sun, Jul 26, 2026</span>
+                  <span>Source-checked Jul 23 · Jul 24–Aug 20, 2026</span>
                 </div>
 
                 <label className="sort-control">
@@ -1307,7 +1369,7 @@ export function App() {
               <div className="active-constraints" aria-label="Active filters">
                 <button type="button" onClick={() => setFilterOpen(true)}>
                   <CalendarBlank size={16} aria-hidden="true" />
-                  This weekend
+                  {preferences.date}
                 </button>
                 <button type="button" onClick={() => setFilterOpen(true)}>
                   <CurrencyDollar size={16} aria-hidden="true" />
@@ -1360,8 +1422,8 @@ export function App() {
               <div className="results-footnote">
                 <Database size={17} weight="bold" aria-hidden="true" />
                 <p>
-                  Results come from a cached demo catalog. Unknown details stay
-                  unknown until a source confirms them.
+                  Every result links to its canonical Luma page. This is a
+                  verified snapshot, so recheck the organizer before attending.
                 </p>
                 {dismissedIds.length ? (
                   <button
@@ -1385,24 +1447,29 @@ export function App() {
           >
             <Sparkle size={20} weight="fill" aria-hidden="true" />
             Ask Findr
-            <span>3</span>
+            <span>{events.length}</span>
           </button>
         </main>
 
-        <aside className="guide-desktop">
-          <GuidePanel
-            idPrefix="desktop"
-            messages={guideMessages}
-            input={guideInput}
-            setInput={setGuideInput}
-            loading={guideLoading}
-            preferences={preferences}
-            onSubmit={submitGuide}
-            onPrompt={submitGuide}
-            onOpenEvent={openEvent}
-            onReset={resetGuide}
-          />
-        </aside>
+        {guideDesktopOpen ? (
+          <aside className="guide-desktop">
+            <GuidePanel
+              idPrefix="desktop"
+              messages={guideMessages}
+              input={guideInput}
+              setInput={setGuideInput}
+              loading={guideLoading}
+              status={guideStatus}
+              eventCount={events.length}
+              preferences={preferences}
+              onSubmit={submitGuide}
+              onPrompt={submitGuide}
+              onOpenEvent={openEvent}
+              onReset={resetGuide}
+              onClose={() => setGuideDesktopOpen(false)}
+            />
+          </aside>
+        ) : null}
       </div>
 
       <FilterDialog
@@ -1432,6 +1499,8 @@ export function App() {
               input={guideInput}
               setInput={setGuideInput}
               loading={guideLoading}
+              status={guideStatus}
+              eventCount={events.length}
               preferences={preferences}
               onSubmit={submitGuide}
               onPrompt={submitGuide}

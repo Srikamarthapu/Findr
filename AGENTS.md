@@ -16,4 +16,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Avoid neon, arcade typography, leaderboard cues, HUD styling, glow, and other gamified treatments.
 - Prioritize scanability, honest eligibility states, source freshness, visible focus, and simple navigation.
 - Use real Supabase Auth for account creation and sign-in; never present simulated authentication as live.
-- Clearly label demo catalog records and local guide responses until live event ingestion and an external model provider are actually connected.
+- Show only source-verified real events with direct, event-specific organizer links; never mix mock records into the visible catalog.
+- Keep organizer age policies unknown unless a source explicitly confirms them, even when an event mentions students.
+- Keep AI provider keys server-only in ignored environment files and expose provider/model status without exposing credentials.
+- Let users close and reopen the Findr concierge without losing the current conversation.

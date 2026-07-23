@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
+    "test:secrets": "node scripts/check-client-secrets.mjs",
+    "test:guide": "node --test tests/guide-rag.test.mjs tests/provider-cascade.test.mjs",
+    "verify:events": "node scripts/verify-event-sources.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },
   "dependencies": {

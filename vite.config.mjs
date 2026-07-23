@@ -1,19 +1,27 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { findrGuidePlugin } from "./server/vite-guide-plugin.mjs";
 
-export default defineConfig({
-  build: {
-    outDir: "dist/client",
-  },
-  optimizeDeps: {
-    include: ["react", "react-dom/client"],
-  },
-  server: {
-    host: "0.0.0.0",
-    allowedHosts: ["terminal.local"],
-    warmup: {
-      clientFiles: ["./src/main.jsx"],
+export default defineConfig(({ mode, command }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+
+  return {
+    build: {
+      outDir: "dist/client",
     },
-  },
-  plugins: [react()],
+    optimizeDeps: {
+      include: ["react", "react-dom/client"],
+    },
+    server: {
+      host: "0.0.0.0",
+      allowedHosts: ["terminal.local"],
+      warmup: {
+        clientFiles: ["./src/main.jsx"],
+      },
+    },
+    plugins: [
+      react(),
+      ...(command === "serve" ? [findrGuidePlugin({ env })] : []),
+    ],
+  };
 });
