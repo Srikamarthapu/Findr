@@ -253,7 +253,7 @@ function extractAge(text) {
 
 function explicitInterests(text) {
   const match = text.match(
-    /\b(?:interested in|interests?(?: are| include|:)?|i (?:like|love|enjoy)|i(?:'m| am) into|into|looking for events? (?:about|in)|events? about)\s+(.+?)(?=(?:[,;.]\s*(?:anywhere|based|located|near|around|within|i can travel|this|next|on|during|available|weekends?|weeknights?|budget|under|up to|free|any budget|\$))|[.;]|$)/i,
+    /\b(?:interested in|interests?(?: are| include|:)?|i (?:like|love|enjoy)|i(?:'m| am) into|into|looking for events? (?:about|in)|events? about)\s+(.+?)(?=(?:[,;.]\s*(?:in\s+(?:san francisco|s\.?f\.?|oakland|berkeley|san jose|silicon valley|palo alto|mountain view|redwood city|bay area|east bay|south bay|peninsula|marin|sacramento)\b|anywhere|based|located|near|around|within|i can travel|this|next|on|during|available|weekends?|weeknights?|budget|under|up to|free|any budget|\$))|[.;]|$)/i,
   );
   return match ? normalizeInterests(match[1]) : [];
 }

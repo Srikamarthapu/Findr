@@ -218,6 +218,23 @@ test("collects a natural multi-field one-shot profile", () => {
   });
 });
 
+test("one-shot profile keeps named locations out of the interest field", () => {
+  const result = collectIntake({
+    query:
+      "I am 25, interested in AI research, developer tools, and startup demos, in San Francisco or Palo Alto, available on any upcoming weeknight, with any budget.",
+    profile: {},
+  });
+
+  assert.equal(result.intake.complete, true);
+  assert.equal(
+    result.profile.interests,
+    "AI research, developer tools, startup demos",
+  );
+  assert.equal(result.profile.locations, "San Francisco, Palo Alto");
+  assert.equal(result.profile.datePreference, "Weeknights");
+  assert.equal(result.profile.budgetFlexibility, "any");
+});
+
 test("collecting the final budget enables retrieval in the same request", async () => {
   let retrievalCalls = 0;
   let retrievedQuery = "";
