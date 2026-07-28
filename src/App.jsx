@@ -80,9 +80,9 @@ const initialGuideMessages = [
     id: "welcome",
     role: "assistant",
     summary:
-      "Before I recommend anything, I’ll learn five details: your age, interests, preferred locations, date preference, and maximum cost.",
+      "I’ll help you narrow down real events using five quick details.",
     eventIds: [],
-    question: "First, how old are you?",
+    question: "To start, how old are you?",
     providerLabel: "Profile setup",
     model: "step 1 of 5",
   },

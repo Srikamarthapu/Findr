@@ -498,13 +498,38 @@ export function intakeQuestion(intake) {
     : copy.question;
 }
 
-export function intakeAnswer(profile, intake) {
+function capturedFieldAcknowledgment(profile, fieldsCapturedThisTurn) {
+  const latestField = fieldsCapturedThisTurn.at(-1);
+  const acknowledgments = {
+    age: () => `Got it — ${profile.age}.`,
+    interests: () => `Nice — ${profile.interests}.`,
+    locations: () => `Got it — ${profile.locations}.`,
+    datePreference: () => `Perfect — ${profile.datePreference}.`,
+    maxCost: () =>
+      profile.budgetFlexibility === "any"
+        ? "Got it — any budget."
+        : `Got it — up to $${profile.maxCost}.`,
+  };
+  return acknowledgments[latestField]?.() ?? null;
+}
+
+export function intakeAnswer(
+  profile,
+  intake,
+  { fieldsCapturedThisTurn = [] } = {},
+) {
   const needsAge = intake.nextField === "age";
+  const acknowledgment = capturedFieldAcknowledgment(
+    profile,
+    fieldsCapturedThisTurn,
+  );
   return {
     role: "assistant",
-    summary: needsAge
-      ? "I didn’t catch a valid age yet."
-      : "Thanks — I’m building your event profile before searching the verified catalog.",
+    summary:
+      acknowledgment ??
+      (needsAge
+        ? "I didn’t catch a valid age yet."
+        : "Got it."),
     eventIds: [],
     caveat: null,
     question: intakeQuestion(intake),

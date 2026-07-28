@@ -588,22 +588,52 @@ export function buildConversationMessages({
   profile,
   intake,
   requiredQuestion = null,
+  previousProfile = null,
+  fieldsCapturedThisTurn = [],
+  conversationStarted,
 }) {
   const collectingProfile = Boolean(intake && !intake.complete);
+  const boundedHistory = boundedConversationHistory(history);
+  const continuingConversation =
+    typeof conversationStarted === "boolean"
+      ? conversationStarted
+      : boundedHistory.length > 0;
+  const capturedFields = Array.isArray(fieldsCapturedThisTurn)
+    ? fieldsCapturedThisTurn
+        .filter((field) => typeof field === "string")
+        .slice(0, 5)
+    : [];
   const system = [
     "You are Findr, a warm, concise event discovery concierge.",
     "Respond naturally to the user's greeting, small talk, partial answer, or general question.",
     "Address the user directly. Never narrate the exchange or refer to them as 'the user'.",
+    continuingConversation
+      ? "Continue directly from recentConversation. Do not greet or welcome the user again, reintroduce yourself, restart the intake, restate the five-step plan, or repeat information already collected."
+      : "This is the first live reply. A brief greeting is appropriate only if the user greeted you.",
     collectingProfile
       ? "The event profile is incomplete. Do not retrieve, name, or recommend any events yet."
       : "This turn is general conversation, not an event search. Do not name or recommend events.",
+    collectingProfile
+      ? "Keep the summary to one short, conversational acknowledgment or answer. The question is rendered separately, so do not repeat or paraphrase it in the summary or caveat."
+      : "Keep the response concise and connected to the recent conversation.",
+    collectingProfile
+      ? "Do not explain the intake process or say what you need to learn, collect, know, or ask next. Do not say you need information so you can tailor, find, or recommend events."
+      : null,
+    collectingProfile && capturedFields.length
+      ? "fieldsCapturedThisTurn identifies profile details added by this message. Briefly acknowledge only those new values once, without claiming the user already shared them."
+      : null,
+    collectingProfile
+      ? "Do not put a question in summary or caveat. Ask exactly one question using the required question field."
+      : null,
     "Return only one JSON object with exactly these keys:",
     '{"summary":"string","eventIds":[],"caveat":"string or null","question":"string"}',
     "eventIds must be an empty array. Do not include markdown, URLs, or raw catalog IDs.",
     collectingProfile
       ? `The question field must be exactly ${JSON.stringify(requiredQuestion)}.`
       : "Use the question field for one brief, relevant follow-up or an offer to return to event discovery.",
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const user = JSON.stringify({
     task: compact(query, 800),
@@ -615,8 +645,22 @@ export function buildConversationMessages({
       maxCost: finiteNumberOrNull(profile?.maxCost),
       budgetFlexibility: compact(profile?.budgetFlexibility, 20),
     },
+    previousProfile: previousProfile
+      ? {
+          age: finiteNumberOrNull(previousProfile.age),
+          interests: compact(previousProfile.interests, 160),
+          locations: compact(previousProfile.locations, 160),
+          datePreference: compact(previousProfile.datePreference, 120),
+          maxCost: finiteNumberOrNull(previousProfile.maxCost),
+          budgetFlexibility: compact(
+            previousProfile.budgetFlexibility,
+            20,
+          ),
+        }
+      : null,
+    fieldsCapturedThisTurn: capturedFields,
     nextMissingField: collectingProfile ? intake.nextField : null,
-    recentConversation: boundedConversationHistory(history),
+    recentConversation: boundedHistory,
   });
 
   return [

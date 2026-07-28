@@ -16,6 +16,7 @@ import {
   collectIntake,
   enrichQueryWithProfile,
   intakeAnswer,
+  intakeFields,
   intakeQuestion,
   preferencesFromProfile,
 } from "./intake.mjs";
@@ -230,7 +231,56 @@ function emitAnswer(emit, result, profile, intake) {
   });
 }
 
-function validateConversationAnswer(raw, requiredQuestion = null) {
+function isConversationContinuation(history) {
+  return (
+    Array.isArray(history) &&
+    history.some(
+      (message) =>
+        message &&
+        (message.role === "assistant" || message.role === "user") &&
+        typeof message.content === "string" &&
+        message.content.trim(),
+    )
+  );
+}
+
+function restartsConversation(message) {
+  const summary = String(message.summary ?? "").trim();
+  return (
+    /^(?:hi|hello|hey)(?:\s+there)?\b/i.test(summary) ||
+    /^i(?:['’]?m| am)\s+(?:here to help|glad you(?:['’]?re| are) here|happy you(?:['’]?re| are) here)\b/i.test(
+      summary,
+    ) ||
+    /\b(?:to get started|to start finding|before i recommend|i(?:['’]?ll| will) ask (?:you )?(?:five|5) (?:quick )?questions?)\b/i.test(
+      summary,
+    ) ||
+    /\b(?:you(?:['’]?ve| have) already shared|i need to (?:learn|collect|know|ask)|so i can (?:tailor|find|recommend))\b/i.test(
+      summary,
+    )
+  );
+}
+
+function repeatsIntakeQuestion(message, nextField) {
+  const text = `${message.summary ?? ""} ${message.caveat ?? ""}`.trim();
+  const patterns = {
+    age: /\b(?:how old (?:are you|you are)|need (?:to know )?your age|(?:tell|share|provide|enter)(?: me)? your age|age from 13 to 120)\b/i,
+    interests:
+      /\b(?:what (?:topics|kinds? of events).*(?:interest|enjoy)|which topics.*(?:interest|enjoy)|(?:tell|share|provide)(?: me)? your interests)\b/i,
+    locations:
+      /\b(?:which locations?|what (?:city|travel area)|where (?:should i|can i) search|(?:tell|share|provide)(?: me)? your (?:location|travel area))\b/i,
+    datePreference:
+      /\b(?:when are you available|what dates? (?:work|are best)|(?:tell|share|provide)(?: me)? your availability)\b/i,
+    maxCost:
+      /\b(?:what is the most you want to spend|what(?:'s| is) your budget|(?:tell|share|provide)(?: me)? your budget)\b/i,
+  };
+  return Boolean(patterns[nextField]?.test(text));
+}
+
+function validateConversationAnswer(
+  raw,
+  requiredQuestion = null,
+  { continuingConversation = false, nextField = null } = {},
+) {
   const message = validateGuideAnswer(raw, []);
   if (
     /\b(?:the user|user (?:asked|said|greeted|wants|needs))\b/i.test(
@@ -238,6 +288,18 @@ function validateConversationAnswer(raw, requiredQuestion = null) {
     )
   ) {
     throw new Error("model_output_not_direct");
+  }
+  if (continuingConversation && restartsConversation(message)) {
+    throw new Error("model_output_restarts_conversation");
+  }
+  if (requiredQuestion && repeatsIntakeQuestion(message, nextField)) {
+    throw new Error("model_output_repeats_intake_question");
+  }
+  if (
+    requiredQuestion &&
+    /[?？]/.test(`${message.summary} ${message.caveat ?? ""}`)
+  ) {
+    throw new Error("model_output_duplicates_intake_question");
   }
   return {
     ...message,
@@ -262,23 +324,47 @@ export async function runGuide({
   providerChainImpl = createProviderChain,
   providerCompletionImpl = streamProviderCompletion,
 }) {
-  const profileWasComplete = collectIntake({
+  const intakeBeforeTurn = collectIntake({
     query: "",
     profile,
-  }).intake.complete;
+  });
+  const profileWasComplete = intakeBeforeTurn.intake.complete;
   const intakeState = collectIntake({ query, profile });
+  const hasProfileValue = (candidate, field) => {
+    if (field === "age") return Number.isFinite(candidate.age);
+    if (field === "maxCost") {
+      return (
+        Number.isFinite(candidate.maxCost) ||
+        candidate.budgetFlexibility === "any"
+      );
+    }
+    return typeof candidate[field] === "string" && candidate[field].trim();
+  };
+  const fieldsCapturedThisTurn = intakeFields.filter(
+    (field) =>
+      !hasProfileValue(intakeBeforeTurn.profile, field) &&
+      hasProfileValue(intakeState.profile, field),
+  );
   if (!intakeState.intake.complete) {
     const requiredQuestion = intakeQuestion(intakeState.intake);
+    const continuingConversation = isConversationContinuation(history);
     const messages = buildConversationMessages({
       query,
       history,
       profile: intakeState.profile,
       intake: intakeState.intake,
       requiredQuestion,
+      previousProfile: intakeBeforeTurn.profile,
+      fieldsCapturedThisTurn,
+      conversationStarted: continuingConversation,
     });
     const live = await runProviderCascade({
       messages,
-      validate: (raw) => validateConversationAnswer(raw, requiredQuestion),
+      validate: (raw) =>
+        validateConversationAnswer(raw, requiredQuestion, {
+          continuingConversation,
+          nextField: intakeState.intake.nextField,
+        }),
       env,
       fetchImpl,
       signal,
@@ -292,7 +378,10 @@ export async function runGuide({
           provider: "intake",
           providerLabel: "Findr profile intake",
           model: "deterministic",
-          message: intakeAnswer(intakeState.profile, intakeState.intake),
+          message: intakeAnswer(intakeState.profile, intakeState.intake, {
+            query,
+            fieldsCapturedThisTurn,
+          }),
           attempts: live.attempts,
         };
     emitAnswer(emit, result, intakeState.profile, intakeState.intake);

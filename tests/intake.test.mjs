@@ -200,6 +200,200 @@ test("a general question during intake is answered before asking the next field"
   assert.equal(result.intake.nextField, "interests");
 });
 
+test("continuing intake carries turn progress and rejects model restarts", async () => {
+  let retrievalCalls = 0;
+  const prompts = [];
+  const initialHistory = [
+    {
+      role: "assistant",
+      content:
+        "Before I recommend anything, I’ll learn five details. First, how old are you?",
+    },
+  ];
+  const capabilityTurn = await runGuide({
+    query: "Can you help me find events?",
+    profile: emptyProfile,
+    history: initialHistory,
+    retrieveImpl: () => {
+      retrievalCalls += 1;
+      return [];
+    },
+    providerChainImpl: () => [
+      {
+        provider: "smooth",
+        providerLabel: "Smooth provider",
+        model: "smooth-model",
+      },
+    ],
+    providerCompletionImpl: async (_candidate, { messages }) => {
+      prompts.push(messages);
+      return JSON.stringify({
+        summary: "Absolutely — I’ll help you find events that fit.",
+        eventIds: [],
+        caveat: null,
+        question: "Ignored provider question",
+      });
+    },
+  });
+  assert.equal(capabilityTurn.intake.nextField, "age");
+  assert.match(capabilityTurn.message.question, /how old|age/i);
+  assert.doesNotMatch(capabilityTurn.message.summary, /^(?:hi|hello|hey)\b/i);
+
+  const result = await runGuide({
+    query: "18",
+    profile: capabilityTurn.profile,
+    history: [
+      ...initialHistory,
+      { role: "user", content: "Can you help me find events?" },
+      {
+        role: "assistant",
+        content: `${capabilityTurn.message.summary} ${capabilityTurn.message.question}`,
+      },
+    ],
+    retrieveImpl: () => {
+      retrievalCalls += 1;
+      return [];
+    },
+    providerChainImpl: () => [
+      {
+        provider: "restart",
+        providerLabel: "Restarting provider",
+        model: "restart-model",
+      },
+      {
+        provider: "process",
+        providerLabel: "Process-narrating provider",
+        model: "process-model",
+      },
+      {
+        provider: "smooth",
+        providerLabel: "Smooth provider",
+        model: "smooth-model",
+      },
+    ],
+    providerCompletionImpl: async (candidate, { messages }) => {
+      prompts.push(messages);
+      if (candidate.provider === "restart") {
+        return JSON.stringify({
+          summary:
+            "Hi! I’m here to help you discover events you’ll love. You’ve already shared your age.",
+          eventIds: [],
+          caveat: null,
+          question: "Ignored provider question",
+        });
+      }
+      if (candidate.provider === "process") {
+        return JSON.stringify({
+          summary:
+            "You’re 18 and looking for events. I need to learn what you enjoy so I can find the right fit.",
+          eventIds: [],
+          caveat: null,
+          question: "Ignored provider question",
+        });
+      }
+      return JSON.stringify({
+        summary: "Got it — 18.",
+        eventIds: [],
+        caveat: null,
+        question: "Ignored provider question",
+      });
+    },
+  });
+
+  assert.equal(retrievalCalls, 0);
+  assert.equal(result.provider, "smooth");
+  assert.equal(result.profile.age, 18);
+  assert.equal(result.intake.nextField, "interests");
+  assert.equal(result.attempts[0].reason, "model_output_restarts_conversation");
+  assert.equal(result.attempts[1].reason, "model_output_restarts_conversation");
+  assert.equal(result.message.summary, "Got it — 18.");
+  assert.match(result.message.question, /topics|interested/i);
+  assert.doesNotMatch(result.message.summary, /^(?:hi|hello|hey)\b/i);
+  assert.deepEqual(result.message.eventIds, []);
+  assert.match(prompts[1][0].content, /continue directly/i);
+  assert.match(prompts[1][0].content, /do not greet or welcome/i);
+  assert.match(prompts[1][0].content, /question is rendered separately/i);
+  const promptContext = JSON.parse(prompts[1][1].content);
+  assert.deepEqual(promptContext.fieldsCapturedThisTurn, ["age"]);
+  assert.deepEqual(promptContext.previousProfile, {
+    ...emptyProfile,
+    budgetFlexibility: "",
+  });
+  assert.equal(promptContext.profile.age, 18);
+});
+
+test("continuing intake rejects summaries that duplicate the required question", async () => {
+  const result = await runGuide({
+    query: "Can you help me find events?",
+    profile: emptyProfile,
+    history: [
+      {
+        role: "assistant",
+        content: "First, how old are you?",
+      },
+    ],
+    retrieveImpl: () => {
+      throw new Error("retrieval must not run during intake");
+    },
+    providerChainImpl: () => [
+      {
+        provider: "repeating",
+        providerLabel: "Repeating provider",
+        model: "repeating-model",
+      },
+      {
+        provider: "smooth",
+        providerLabel: "Smooth provider",
+        model: "smooth-model",
+      },
+    ],
+    providerCompletionImpl: async (candidate) =>
+      JSON.stringify({
+        summary:
+          candidate.provider === "repeating"
+            ? "Absolutely. To get started, I need to know your age."
+            : "Absolutely — I can help with that.",
+        eventIds: [],
+        caveat: null,
+        question: "Ignored provider question",
+      }),
+  });
+
+  assert.equal(result.provider, "smooth");
+  assert.equal(
+    result.attempts[0].reason,
+    "model_output_restarts_conversation",
+  );
+  assert.match(result.message.question, /how old|age/i);
+  assert.doesNotMatch(result.message.summary, /\bneed to know your age\b/i);
+});
+
+test("deterministic intake fallback acknowledges a newly captured value", async () => {
+  const result = await runGuide({
+    query: "18",
+    profile: emptyProfile,
+    history: [
+      {
+        role: "assistant",
+        content: "First, how old are you?",
+      },
+    ],
+    retrieveImpl: () => {
+      throw new Error("retrieval must not run during intake");
+    },
+    providerChainImpl: () => [],
+  });
+
+  assert.equal(result.provider, "intake");
+  assert.equal(result.profile.age, 18);
+  assert.equal(result.intake.nextField, "interests");
+  assert.equal(
+    result.message.summary,
+    "Got it — 18.",
+  );
+  assert.match(result.message.question, /topics|interested/i);
+});
+
 test("collects a natural multi-field one-shot profile", () => {
   const result = collectIntake({
     query:

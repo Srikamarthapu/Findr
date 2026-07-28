@@ -16,6 +16,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Avoid neon, arcade typography, leaderboard cues, HUD styling, glow, and other gamified treatments.
 - Prioritize scanability, honest eligibility states, source freshness, visible focus, and simple navigation.
 - The guide must begin with conversational profile intake and collect age, interests, travel area or city, availability, and budget before it retrieves or recommends events. Greetings and incomplete profiles must never trigger recommendations.
+- Keep guide dialogue continuous: greet at most once, briefly acknowledge only newly captured details, ask exactly one next-missing question, and never restart onboarding or narrate the intake process on later turns.
 - Account deletion must be a real, irreversible Supabase Auth deletion performed server-side after re-verifying the current session. Never expose the service-role key or accept a user ID from the browser.
 - Treat the editorial calendar rail as navigation, not decoration: users must be able to select a date, see only events on that date, understand dates with verified events, and clear the date filter.
 - Use real Supabase Auth for account creation and sign-in; never present simulated authentication as live.
