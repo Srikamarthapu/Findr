@@ -335,6 +335,46 @@ a {
   font-size: 10px;
 }
 
+.calendar-month-nav {
+  display: grid;
+  grid-template-columns: 28px 1fr 28px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: #dbe4e1;
+  text-align: center;
+}
+
+.calendar-month-nav span {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.calendar-month-nav button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  color: #dbe4e1;
+  background: transparent;
+  border: 1px solid #405562;
+  border-radius: 2px;
+}
+
+.calendar-month-nav button:not(:disabled):hover {
+  color: var(--white);
+  background: #193747;
+  border-color: #759099;
+}
+
+.calendar-month-nav button:disabled {
+  color: #607680;
+  cursor: default;
+}
+
 .weekdays,
 .calendar-days {
   display: grid;
@@ -352,18 +392,89 @@ a {
   gap: 3px 0;
 }
 
-.calendar-days span {
+.calendar-days span,
+.calendar-days button {
   display: grid;
-  min-height: 22px;
+  min-height: 24px;
   place-items: center;
   color: #cfdbd9;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 2px;
+  font: inherit;
 }
 
-.calendar-days .today {
+.calendar-days button {
+  position: relative;
+  width: 100%;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.calendar-days .outside-month,
+.calendar-days button:disabled {
+  color: #667c84;
+}
+
+.calendar-days button:disabled {
+  cursor: default;
+}
+
+.calendar-days button:not(:disabled):hover {
+  color: var(--white);
+  background: #193747;
+  border-color: #54717a;
+}
+
+.calendar-days button:focus-visible {
+  outline: 2px solid #8dc4bd;
+  outline-offset: 1px;
+}
+
+.calendar-days button.today {
   color: var(--white);
   background: var(--brick);
+  border-color: #c48170;
   font-weight: 700;
+}
+
+.calendar-days button.selected {
+  color: var(--ink-strong);
+  background: #e7efeb;
+  border-color: #75b9ae;
+  box-shadow: 0 0 0 1px #75b9ae;
+  font-weight: 750;
+}
+
+.calendar-days button.today.selected {
+  color: var(--white);
+  background: var(--brick);
+  border-color: #9ed0c7;
+  box-shadow: 0 0 0 1px #9ed0c7;
+}
+
+.calendar-days button.has-events::after {
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  background: #75b9ae;
+  border-radius: 50%;
+  content: "";
+  transform: translateX(-50%);
+}
+
+.calendar-days button.selected.has-events::after {
+  background: var(--teal-dark);
+}
+
+.calendar-days button.today.selected.has-events::after {
+  background: var(--white);
 }
 
 .rail-section {
@@ -376,17 +487,48 @@ a {
   color: #b9c7c6;
 }
 
-.weekend-list div {
+.weekend-list button {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: baseline;
+  width: 100%;
   min-height: 34px;
   padding: 5px 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
   border-bottom: 1px solid #314856;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    padding 140ms ease;
 }
 
-.weekend-list div:last-child {
+.weekend-list button:last-child {
   border-bottom: 0;
+}
+
+.weekend-list button:hover {
+  color: var(--white);
+  background: #102b3c;
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+.weekend-list button:focus-visible {
+  outline: 2px solid #8dc4bd;
+  outline-offset: 1px;
+}
+
+.weekend-list button.selected {
+  padding-right: 6px;
+  padding-left: 8px;
+  color: var(--white);
+  background: #163746;
+  box-shadow: inset 2px 0 #75b9ae;
 }
 
 .weekend-list strong {
@@ -396,10 +538,21 @@ a {
 }
 
 .weekend-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: #aebbbd;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 10px;
   text-transform: uppercase;
+}
+
+.weekend-list button.has-events span::before {
+  width: 4px;
+  height: 4px;
+  background: #75b9ae;
+  border-radius: 50%;
+  content: "";
 }
 
 .nearby-list {
@@ -671,8 +824,42 @@ a {
   font-weight: 650;
 }
 
+.active-constraints button.date-constraint-selected {
+  color: var(--teal-dark);
+  background: var(--teal-pale);
+  border-color: #9fc3bf;
+}
+
 .event-list {
   border-top: 1px solid var(--line);
+}
+
+.load-more-events {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 0 16px;
+  color: var(--ink);
+  background: var(--mineral);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-weight: 750;
+}
+
+.load-more-events:hover {
+  color: var(--teal-dark);
+  background: var(--teal-pale);
+  border-color: #9fc3bf;
+}
+
+.load-more-events span {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .event-row {
@@ -1726,6 +1913,93 @@ a {
 
 .account-summary .auth-submit {
   grid-column: 1 / -1;
+}
+
+.account-danger {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 14px;
+  margin-top: 10px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.account-danger h3 {
+  margin: 4px 0 5px;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.account-danger p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.account-danger form {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: var(--brick-pale);
+  border: 1px solid #deb4a8;
+  border-radius: 4px;
+}
+
+.account-danger form > label {
+  color: #713a31;
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.account-danger form > input {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid #c99689;
+  border-radius: 4px;
+  outline: none;
+}
+
+.account-danger form > input:focus {
+  border-color: var(--brick);
+  box-shadow: 0 0 0 3px rgb(181 81 61 / 12%);
+}
+
+.account-danger-actions {
+  display: grid;
+  grid-template-columns: 0.72fr 1.28fr;
+  gap: 9px;
+}
+
+.button.danger,
+.button.danger-outline {
+  justify-content: center;
+  color: #7f3529;
+  border: 1px solid #c98778;
+}
+
+.button.danger {
+  color: var(--white);
+  background: #9e4636;
+  border-color: #9e4636;
+}
+
+.button.danger:hover:not(:disabled) {
+  background: #84382c;
+  border-color: #84382c;
+}
+
+.button.danger-outline {
+  width: fit-content;
+  background: var(--white);
+}
+
+.button.danger-outline:hover:not(:disabled) {
+  background: var(--brick-pale);
+  border-color: var(--brick);
 }
 
 .event-dialog {

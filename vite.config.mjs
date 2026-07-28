@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { findrAccountPlugin } from "./server/vite-account-plugin.mjs";
 import { findrGuidePlugin } from "./server/vite-guide-plugin.mjs";
 
 export default defineConfig(({ mode, command }) => {
@@ -21,7 +22,9 @@ export default defineConfig(({ mode, command }) => {
     },
     plugins: [
       react(),
-      ...(command === "serve" ? [findrGuidePlugin({ env })] : []),
+      ...(command === "serve"
+        ? [findrAccountPlugin({ env }), findrGuidePlugin({ env })]
+        : []),
     ],
   };
 });

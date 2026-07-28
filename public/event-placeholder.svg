@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Findr event source placeholder</title>
+  <desc id="description">An editorial navy, mineral, sage, and brick geometric composition.</desc>
+  <rect width="1200" height="630" fill="#f3f1ea"/>
+  <path d="M0 0h420v630H0z" fill="#071f2d"/>
+  <path d="M420 0h780v168H420z" fill="#d9e2d8"/>
+  <path d="M880 168h320v462H880z" fill="#c75c49"/>
+  <circle cx="650" cy="385" r="142" fill="none" stroke="#1b7a7a" stroke-width="28"/>
+  <path d="M561 385h178M650 296v178" stroke="#1b7a7a" stroke-width="22" stroke-linecap="round"/>
+  <path d="M68 92h264M68 142h190M68 494h264" stroke="#f3f1ea" stroke-width="18" stroke-linecap="round"/>
+</svg>

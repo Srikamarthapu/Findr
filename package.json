@@ -8,9 +8,13 @@
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
     "test:secrets": "node scripts/check-client-secrets.mjs",
-    "test:guide": "node --test tests/guide-rag.test.mjs tests/provider-cascade.test.mjs",
+    "test:account": "node --test tests/account-service.test.mjs",
+    "test:guide": "node --test tests/intake.test.mjs tests/guide-rag.test.mjs tests/provider-cascade.test.mjs",
+    "test:events": "node --test tests/event-pipeline.test.mjs",
+    "sync:events": "node scripts/sync-events.mjs",
     "verify:events": "node scripts/verify-event-sources.mjs",
-    "test:sites": "node --test tests/sites-worker.test.mjs"
+    "test:sites": "node --test tests/sites-worker.test.mjs",
+    "test:vercel": "node --test tests/vercel-api.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",

@@ -5,10 +5,12 @@ import {
   EnvelopeSimple,
   LockKey,
   SignOut,
+  Trash,
   UserCircle,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
+import { deleteCurrentAccount } from "./lib/account-client.js";
 import { isSupabaseConfigured, supabase } from "./lib/supabase.js";
 
 function getFriendlyAuthError(error) {
@@ -22,6 +24,32 @@ function getFriendlyAuthError(error) {
     return "Confirm your email first, then come back to sign in.";
   }
 
+  if (
+    message === "account_deletion_not_configured" ||
+    message === "account_service_unavailable"
+  ) {
+    return "Account deletion is not active yet. A server-only Supabase secret key still needs to be connected.";
+  }
+
+  if (
+    message === "unauthorized" ||
+    message === "account_session_missing" ||
+    message === "invalid_session"
+  ) {
+    return "Your session expired. Sign in again before deleting your account.";
+  }
+
+  if (
+    message === "account_deletion_failed" ||
+    message.startsWith("account_delete")
+  ) {
+    return "Your account could not be deleted. Nothing was changed; please try again.";
+  }
+
+  if (message === "rate_limited") {
+    return "Too many deletion attempts were made. Wait a minute, then try again.";
+  }
+
   return message;
 }
 
@@ -30,17 +58,23 @@ export function AuthDialog({
   onOpenChange,
   session,
   sessionLoading,
+  onAccountDeleted,
 }) {
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     if (!open) {
       setPassword("");
       setNotice(null);
+      setDeleteOpen(false);
+      setDeleteConfirmation("");
     }
   }, [open]);
 
@@ -91,7 +125,7 @@ export function AuthDialog({
   };
 
   const handleSignOut = async () => {
-    if (!supabase || submitting) return;
+    if (!supabase || submitting || deleting) return;
 
     setSubmitting(true);
     setNotice(null);
@@ -104,6 +138,34 @@ export function AuthDialog({
     }
 
     onOpenChange(false);
+  };
+
+  const handleDeleteAccount = async (event) => {
+    event.preventDefault();
+    if (
+      !supabase ||
+      deleting ||
+      submitting ||
+      deleteConfirmation !== "DELETE"
+    ) {
+      return;
+    }
+
+    setDeleting(true);
+    setNotice(null);
+
+    try {
+      await deleteCurrentAccount(session?.access_token);
+      await supabase.auth.signOut({ scope: "local" }).catch(() => {});
+      window.localStorage.removeItem("findr:saved");
+      window.localStorage.removeItem("findr:dismissed");
+      onAccountDeleted?.();
+      onOpenChange(false);
+    } catch (error) {
+      setNotice({ type: "error", text: getFriendlyAuthError(error) });
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const emailAddress = session?.user?.email || "";
@@ -176,11 +238,89 @@ export function AuthDialog({
                 className="button secondary auth-submit"
                 type="button"
                 onClick={handleSignOut}
-                disabled={submitting}
+                disabled={submitting || deleting}
               >
                 <SignOut size={19} aria-hidden="true" />
                 {submitting ? "Signing out…" : "Sign out"}
               </button>
+
+              <section className="account-danger" aria-labelledby="delete-account-title">
+                <div>
+                  <span className="eyebrow">Account controls</span>
+                  <h3 id="delete-account-title">Delete account</h3>
+                  <p>
+                    Permanently removes your Supabase account and clears Findr
+                    saves stored on this device. This cannot be undone.
+                  </p>
+                </div>
+
+                {deleteOpen ? (
+                  <form onSubmit={handleDeleteAccount}>
+                    <label htmlFor="delete-account-confirmation">
+                      Type <strong>DELETE</strong> to confirm
+                    </label>
+                    <input
+                      id="delete-account-confirmation"
+                      value={deleteConfirmation}
+                      onChange={(event) =>
+                        setDeleteConfirmation(event.target.value)
+                      }
+                      autoComplete="off"
+                      spellCheck="false"
+                      placeholder="DELETE"
+                      disabled={deleting}
+                    />
+                    {notice ? (
+                      <div
+                        className={`auth-notice ${notice.type}`}
+                        role={notice.type === "error" ? "alert" : "status"}
+                      >
+                        <WarningCircle
+                          size={19}
+                          weight="bold"
+                          aria-hidden="true"
+                        />
+                        <span>{notice.text}</span>
+                      </div>
+                    ) : null}
+                    <div className="account-danger-actions">
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() => {
+                          setDeleteOpen(false);
+                          setDeleteConfirmation("");
+                          setNotice(null);
+                        }}
+                        disabled={deleting}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="button danger"
+                        type="submit"
+                        disabled={deleting || deleteConfirmation !== "DELETE"}
+                      >
+                        <Trash size={18} weight="bold" aria-hidden="true" />
+                        {deleting ? "Deleting…" : "Delete permanently"}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    className="button danger-outline"
+                    type="button"
+                    onClick={() => {
+                      setDeleteOpen(true);
+                      setNotice(null);
+                    }}
+                    disabled={submitting || deleting}
+                  >
+                    <Trash size={18} aria-hidden="true" />
+                    Delete account
+                  </button>
+                )}
+              </section>
             </div>
           ) : (
             <>

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { retrieveEvents } from "../server/catalog.mjs";
 import { runGuide } from "../server/guide-service.mjs";
 import {
   ProviderError,
@@ -20,15 +21,29 @@ function sseResponse(value, status = 200) {
   });
 }
 
+const now = new Date("2026-07-28T12:00:00-07:00");
+const weekendEvent = retrieveEvents({
+  query: "What can I do this weekend?",
+  preferences: { age: 16, maxCost: 20 },
+  now,
+  limit: 1,
+})[0];
+
 const validAnswer = JSON.stringify({
-  summary: "Two verified weekend hackathons match.",
-  eventIds: [
-    "you-agentic-hackathon-2026-07-24",
-    "jachacks-sf-2026-07-26",
-  ],
+  summary: "A verified weekend hackathon matches.",
+  eventIds: [weekendEvent.id],
   caveat: "Neither organizer publishes an age policy.",
-  question: "Do you prefer Friday or Sunday?",
+  question: "Would you like the source link?",
 });
+
+const completeProfile = {
+  age: 16,
+  interests: "AI, Hackathons",
+  locations: "San Francisco, Bay Area",
+  datePreference: "This weekend",
+  maxCost: 20,
+  budgetFlexibility: "capped",
+};
 
 test("stream adapter detects a live signal and buffers valid content", async () => {
   let alive = 0;
@@ -86,8 +101,9 @@ test("cascade falls from NVIDIA Pro to NVIDIA Flash", async () => {
   const models = [];
   const result = await runGuide({
     query: "What can I do this weekend?",
+    profile: completeProfile,
     preferences: { age: 16, maxCost: 20 },
-    now: new Date("2026-07-23T12:00:00-07:00"),
+    now,
     env: { NVIDIA_NIM_API_KEY: "test-key" },
     fetchImpl: async (_url, options) => {
       const model = JSON.parse(options.body).model;
@@ -102,14 +118,15 @@ test("cascade falls from NVIDIA Pro to NVIDIA Flash", async () => {
     "deepseek-ai/deepseek-v4-flash",
   ]);
   assert.equal(result.model, "deepseek-ai/deepseek-v4-flash");
-  assert.equal(result.message.eventIds.length, 2);
+  assert.equal(result.message.eventIds.length, 1);
 });
 
 test("all provider failures return a labeled grounded fallback", async () => {
   const result = await runGuide({
     query: "hands-on AI",
+    profile: completeProfile,
     preferences: { age: 16, maxCost: 20 },
-    now: new Date("2026-07-23T12:00:00-07:00"),
+    now,
     env: {
       NVIDIA_NIM_API_KEY: "test-key",
       ZAI_API_KEY: "test-key",

@@ -12,6 +12,8 @@ import {
   BookmarkSimple,
   CalendarBlank,
   CaretDown,
+  CaretLeft,
+  CaretRight,
   ChatCircleDots,
   CheckCircle,
   Clock,
@@ -31,35 +33,287 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { AuthDialog } from "./AuthDialog.jsx";
-import { categories, events, initialPreferences, nearbyAreas } from "./data.js";
+import {
+  catalogMeta,
+  categories,
+  events,
+  initialPreferences,
+  nearbyAreas,
+} from "./data.js";
 import { askGuide } from "./lib/guide-client.js";
 import { isSupabaseConfigured, supabase } from "./lib/supabase.js";
+
+const guideProfileFields = [
+  "age",
+  "interests",
+  "locations",
+  "datePreference",
+  "maxCost",
+];
+
+const guideProfileFieldLabels = {
+  age: "Age",
+  interests: "Interests",
+  locations: "Location",
+  datePreference: "Dates",
+  maxCost: "Budget",
+};
+
+const initialGuideProfile = {
+  age: null,
+  interests: "",
+  locations: "",
+  datePreference: "",
+  maxCost: null,
+};
+
+const initialGuideIntake = {
+  complete: false,
+  nextField: "age",
+  step: 1,
+  total: 5,
+  suggestions: ["I'm 16", "I'm 18", "I'm 21 or older"],
+};
 
 const initialGuideMessages = [
   {
     id: "welcome",
     role: "assistant",
     summary:
-      "I can compare the verified events in this catalog without inventing missing details.",
+      "Before I recommend anything, I’ll learn five details: your age, interests, preferred locations, date preference, and maximum cost.",
     eventIds: [],
-    caveat:
-      "Every listed organizer currently leaves its age or minor-admission policy unpublished.",
-    question: "Ask about this weekend, a topic, travel, or registration type.",
-    providerLabel: "Verified catalog",
-    model: "ready",
+    question: "First, how old are you?",
+    providerLabel: "Profile setup",
+    model: "step 1 of 5",
   },
 ];
 
-const quickPrompts = [
+const recommendationPrompts = [
   "What can I do this weekend?",
   "Which event is most hands-on?",
   "Confirmed age eligibility only",
 ];
 
-const initialGuideStatus = {
-  phase: "idle",
-  text: "Ready to search the verified catalog",
+const guideSuggestionFallbacks = {
+  age: ["I'm 16", "I'm 18", "I'm 21 or older"],
+  interests: ["AI and coding", "Maker projects", "Career opportunities"],
+  locations: [
+    "San Francisco",
+    "Oakland or Berkeley",
+    "Anywhere in the Bay Area",
+  ],
+  datePreference: ["This weekend", "The next two weeks", "Any upcoming date"],
+  maxCost: ["Free only", "Up to $20", "Any budget"],
 };
+
+const initialGuideStatus = {
+  phase: "intake",
+  text: "Profile progress · step 1 of 5 · Age next",
+};
+
+function getLocalDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "America/Los_Angeles",
+  }).formatToParts(date);
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+const todayDateKey = getLocalDateKey();
+
+function buildCalendarDays(anchorDateKey) {
+  const [year, month] = anchorDateKey.split("-").map(Number);
+  const firstOfMonth = new Date(Date.UTC(year, month - 1, 1));
+  const start = new Date(firstOfMonth);
+  start.setUTCDate(1 - firstOfMonth.getUTCDay());
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + index);
+    const dateMonth = date.getUTCMonth() + 1;
+    const day = date.getUTCDate();
+    return {
+      dateKey: `${date.getUTCFullYear()}-${String(dateMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      day: String(day),
+      inMonth: dateMonth === month,
+    };
+  });
+}
+
+function shiftMonth(dateKey, amount) {
+  const [year, month] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1 + amount, 1));
+  return date.toISOString().slice(0, 10);
+}
+
+function buildWeekendDates(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const today = new Date(Date.UTC(year, month - 1, day));
+  const weekday = today.getUTCDay();
+  const fridayDelta =
+    weekday === 6 ? -1 : weekday === 0 ? -2 : 5 - weekday;
+  const friday = new Date(today);
+  friday.setUTCDate(today.getUTCDate() + fridayDelta);
+  return Array.from({ length: 3 }, (_, index) => {
+    const date = new Date(friday);
+    date.setUTCDate(friday.getUTCDate() + index);
+    const weekendDateKey = date.toISOString().slice(0, 10);
+    return {
+      dateKey: weekendDateKey,
+      day: String(date.getUTCDate()),
+      weekday: ["Fri", "Sat", "Sun"][index],
+    };
+  });
+}
+
+const weekendDates = buildWeekendDates(todayDateKey);
+
+const verifiedEventCountsByDate = events.reduce((counts, event) => {
+  if (
+    event.verificationStatus !== "verified" ||
+    Date.parse(event.endAt) <= Date.now()
+  ) {
+    return counts;
+  }
+  const dateKey = getLocalDateKey(new Date(event.startAt));
+  counts[dateKey] = (counts[dateKey] || 0) + 1;
+  return counts;
+}, {});
+
+const latestCatalogCheck = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "America/Los_Angeles",
+}).format(new Date(catalogMeta.generatedAt));
+
+const currentCatalogEvents = events.filter(
+  (event) => Date.parse(event.endAt) > Date.now(),
+);
+const catalogLastDateKey = currentCatalogEvents.length
+  ? getLocalDateKey(new Date(currentCatalogEvents.at(-1).startAt))
+  : todayDateKey;
+
+const catalogDateRange = (() => {
+  if (!currentCatalogEvents.length) return "No current event window";
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "America/Los_Angeles",
+  });
+  return `${formatter.format(new Date(currentCatalogEvents[0].startAt))}–${formatter.format(
+    new Date(currentCatalogEvents.at(-1).startAt),
+  )}`;
+})();
+
+function getDateDetails(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return {
+    weekday: new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
+      timeZone: "UTC",
+    }).format(date),
+    day: String(day),
+    monthYear: new Intl.DateTimeFormat("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(date),
+    short: new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }).format(date),
+    long: new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(date),
+  };
+}
+
+function isGuideFieldCollected(profile, field) {
+  if (field === "age") return Number.isFinite(profile.age);
+  if (field === "maxCost") {
+    return (
+      Number.isFinite(profile.maxCost) ||
+      profile.budgetFlexibility === "any"
+    );
+  }
+  return typeof profile[field] === "string" && Boolean(profile[field].trim());
+}
+
+function getGuideProgress(profile, intake) {
+  const total = Number.isFinite(intake?.total) ? intake.total : 5;
+  const collected = guideProfileFields.filter((field) =>
+    isGuideFieldCollected(profile, field),
+  ).length;
+  const complete = Boolean(intake?.complete);
+  const nextField =
+    intake?.nextField ||
+    guideProfileFields.find((field) => !isGuideFieldCollected(profile, field)) ||
+    null;
+  const step = Number.isFinite(intake?.step)
+    ? intake.step
+    : Math.min(collected + 1, total);
+  const nextLabel = nextField
+    ? guideProfileFieldLabels[nextField] || nextField
+    : null;
+
+  return {
+    complete,
+    nextField,
+    step,
+    total,
+    text: complete
+      ? "Profile complete"
+      : `Profile progress · step ${step} of ${total}${nextLabel ? ` · ${nextLabel} next` : ""}`,
+  };
+}
+
+function getGuideProfileChips(profile) {
+  const chips = [];
+  if (Number.isFinite(profile.age)) chips.push(`Age · ${profile.age}`);
+  if (profile.interests?.trim()) {
+    chips.push(`Interests · ${profile.interests.trim()}`);
+  }
+  if (profile.locations?.trim()) {
+    chips.push(`Location · ${profile.locations.trim()}`);
+  }
+  if (profile.datePreference?.trim()) {
+    chips.push(`Dates · ${profile.datePreference.trim()}`);
+  }
+  if (profile.budgetFlexibility === "any") {
+    chips.push("Budget · any");
+  } else if (Number.isFinite(profile.maxCost)) {
+    chips.push(`Budget · up to $${profile.maxCost}`);
+  }
+  return chips;
+}
+
+function getGuideSuggestions(intake) {
+  if (intake?.complete) {
+    return Array.isArray(intake.suggestions) && intake.suggestions.length
+      ? intake.suggestions
+      : recommendationPrompts;
+  }
+  if (Array.isArray(intake?.suggestions) && intake.suggestions.length) {
+    return intake.suggestions;
+  }
+  return guideSuggestionFallbacks[intake?.nextField] || [];
+}
 
 function useStoredArray(key) {
   const [value, setValue] = useState(() => {
@@ -220,7 +474,14 @@ function EventRow({
   );
 }
 
-function EmptyState({ savedOnly, onReset, onOpenGuide }) {
+function EmptyState({
+  savedOnly,
+  selectedDateLabel,
+  onShowAllDates,
+  onReset,
+  onOpenGuide,
+}) {
+  const hasDateFilter = Boolean(selectedDateLabel);
   return (
     <motion.div
       className="empty-state"
@@ -231,19 +492,52 @@ function EmptyState({ savedOnly, onReset, onOpenGuide }) {
       <div className="empty-icon">
         <MagnifyingGlass size={28} aria-hidden="true" />
       </div>
-      <h2>{savedOnly ? "No saved events yet" : "No honest match found"}</h2>
+      <h2>
+        {savedOnly
+          ? hasDateFilter
+            ? `No saved events on ${selectedDateLabel}`
+            : "No saved events yet"
+          : hasDateFilter
+            ? `No verified match on ${selectedDateLabel}`
+            : "No honest match found"}
+      </h2>
       <p>
         {savedOnly
-          ? "Save an event and it will stay on this device for your demo."
-          : "The current filters conflict with the available catalog. Findr will not invent an event to fill the gap."}
+          ? hasDateFilter
+            ? `None of your saved events fall on ${selectedDateLabel}.`
+            : "Save an event and it will stay on this device for your demo."
+          : hasDateFilter
+            ? `The catalog has no event matching every active filter on ${selectedDateLabel}. Findr will not invent one to fill the gap.`
+            : "The current filters conflict with the available catalog. Findr will not invent an event to fill the gap."}
       </p>
       <div className="empty-actions">
-        <button className="button primary" type="button" onClick={onReset}>
-          Reset filters
-        </button>
-        <button className="button secondary" type="button" onClick={onOpenGuide}>
-          Ask Findr what to relax
-        </button>
+        {hasDateFilter ? (
+          <>
+            <button
+              className="button primary"
+              type="button"
+              onClick={onShowAllDates}
+            >
+              Show all dates
+            </button>
+            <button className="button secondary" type="button" onClick={onReset}>
+              Reset filters
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="button primary" type="button" onClick={onReset}>
+              Reset filters
+            </button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={onOpenGuide}
+            >
+              Ask Findr what to relax
+            </button>
+          </>
+        )}
       </div>
     </motion.div>
   );
@@ -261,7 +555,7 @@ function GuideMessage({ message, onOpenEvent }) {
     );
   }
 
-  const groundedEvents = message.eventIds
+  const groundedEvents = (message.eventIds || [])
     .map((id) => events.find((event) => event.id === id))
     .filter(Boolean);
 
@@ -325,7 +619,8 @@ function GuidePanel({
   loading,
   status,
   eventCount,
-  preferences,
+  profile,
+  intake,
   onSubmit,
   onPrompt,
   onOpenEvent,
@@ -333,6 +628,20 @@ function GuidePanel({
   onClose,
 }) {
   const scrollRef = useRef(null);
+  const progress = getGuideProgress(profile, intake);
+  const profileChips = getGuideProfileChips(profile);
+  const suggestions = getGuideSuggestions(intake);
+  const nextFieldLabel = progress.nextField
+    ? guideProfileFieldLabels[progress.nextField] || progress.nextField
+    : null;
+  const serviceStatusText =
+    status.phase === "error"
+      ? status.text
+      : !progress.complete
+        ? progress.text
+        : status.phase === "idle"
+          ? "AI answers are constrained to verified source records."
+          : status.text;
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -358,8 +667,14 @@ function GuidePanel({
             <Sparkle size={25} weight="fill" aria-hidden="true" />
           </div>
           <p>
-            <Database size={15} weight="bold" aria-hidden="true" />
-            {eventCount} verified source {eventCount === 1 ? "record" : "records"}
+            {progress.complete ? (
+              <Database size={15} weight="bold" aria-hidden="true" />
+            ) : (
+              <UserCircle size={15} weight="bold" aria-hidden="true" />
+            )}
+            {progress.complete
+              ? `${eventCount} verified source ${eventCount === 1 ? "record" : "records"}`
+              : progress.text}
           </p>
         </div>
         {onClose ? (
@@ -393,15 +708,16 @@ function GuidePanel({
         ) : null}
       </div>
 
-      <div className="guide-preferences" aria-label="Active preferences">
-        <span>{preferences.origin} area</span>
-        <span>{preferences.date}</span>
-        <span>Up to ${preferences.maxCost}</span>
-        <span>{preferences.level}</span>
-      </div>
+      {profileChips.length ? (
+        <div className="guide-preferences" aria-label="Collected guide profile">
+          {profileChips.map((chip) => (
+            <span key={chip}>{chip}</span>
+          ))}
+        </div>
+      ) : null}
 
       <div className="quick-prompts" aria-label="Suggested questions">
-        {quickPrompts.map((prompt) => (
+        {suggestions.map((prompt) => (
           <button
             key={prompt}
             type="button"
@@ -421,7 +737,11 @@ function GuidePanel({
           id={`${idPrefix}-guide-input`}
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder="Compare, narrow, or ask why…"
+          placeholder={
+            progress.complete
+              ? "Compare, narrow, or ask why…"
+              : `Tell Findr about ${nextFieldLabel?.toLowerCase() || "yourself"}…`
+          }
           disabled={loading}
         />
         <button
@@ -439,9 +759,7 @@ function GuidePanel({
           Reset guide
         </button>
         <p className={`guide-service-status ${status.phase}`}>
-          {status.phase === "idle"
-            ? "AI answers are constrained to verified source records."
-            : status.text}
+          {serviceStatusText}
         </p>
       </footer>
     </section>
@@ -731,85 +1049,151 @@ function ExternalNoticeDialog({ event, open, onOpenChange }) {
   );
 }
 
-function DateRail({ origin, eventCount, onOriginChange, onDataStatus }) {
-  const calendarDays = [
-    "28",
-    "29",
-    "30",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "12",
-    "13",
-    "14",
-    "15",
-    "16",
-    "17",
-    "18",
-    "19",
-    "20",
-    "21",
-    "22",
-    "23",
-    "24",
-    "25",
-    "26",
-    "27",
-    "28",
-    "29",
-    "30",
-    "31",
-    "1",
-  ];
+function DateRail({
+  origin,
+  eventCount,
+  sourceCount,
+  checkedLabel,
+  selectedDate,
+  onDateChange,
+  onOriginChange,
+  onDataStatus,
+}) {
+  const featuredDate = getDateDetails(selectedDate || todayDateKey);
+  const [calendarMonth, setCalendarMonth] = useState(
+    `${(selectedDate || todayDateKey).slice(0, 7)}-01`,
+  );
+  useEffect(() => {
+    if (selectedDate) {
+      setCalendarMonth(`${selectedDate.slice(0, 7)}-01`);
+    }
+  }, [selectedDate]);
+  const calendarDays = buildCalendarDays(calendarMonth);
+  const calendarMonthLabel = getDateDetails(calendarMonth).monthYear;
+  const canViewPreviousMonth =
+    calendarMonth.slice(0, 7) > todayDateKey.slice(0, 7);
+  const canViewNextMonth =
+    calendarMonth.slice(0, 7) < catalogLastDateKey.slice(0, 7);
 
   return (
     <aside className="date-rail" aria-label="Date and nearby areas">
       <div className="today-block">
-        <span>Thursday</span>
-        <strong>23</strong>
-        <em>July 2026</em>
+        <span>{featuredDate.weekday}</span>
+        <strong>{featuredDate.day}</strong>
+        <em>{featuredDate.monthYear}</em>
       </div>
 
-      <div className="mini-calendar" aria-label="July 2026 calendar">
+      <div
+        className="mini-calendar"
+        aria-label={`${calendarMonthLabel} calendar`}
+      >
+        <div className="calendar-month-nav">
+          <button
+            type="button"
+            disabled={!canViewPreviousMonth}
+            aria-label="Show previous month"
+            onClick={() =>
+              setCalendarMonth((current) => shiftMonth(current, -1))
+            }
+          >
+            <CaretLeft size={14} weight="bold" aria-hidden="true" />
+          </button>
+          <span>{calendarMonthLabel}</span>
+          <button
+            type="button"
+            disabled={!canViewNextMonth}
+            aria-label="Show next month"
+            onClick={() =>
+              setCalendarMonth((current) => shiftMonth(current, 1))
+            }
+          >
+            <CaretRight size={14} weight="bold" aria-hidden="true" />
+          </button>
+        </div>
         <div className="weekdays" aria-hidden="true">
           {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
             <span key={`${day}-${index}`}>{day}</span>
           ))}
         </div>
         <div className="calendar-days">
-          {calendarDays.map((day, index) => (
-            <span
-              key={`${day}-${index}`}
-              className={day === "23" && index === 25 ? "today" : ""}
-            >
-              {day}
-            </span>
-          ))}
+          {calendarDays.map((calendarDay) => {
+            if (!calendarDay.inMonth) {
+              return (
+                <span
+                  className="outside-month"
+                  key={calendarDay.dateKey}
+                  aria-hidden="true"
+                >
+                  {calendarDay.day}
+                </span>
+              );
+            }
+
+            const isPast = calendarDay.dateKey < todayDateKey;
+            const isToday = calendarDay.dateKey === todayDateKey;
+            const isSelected = calendarDay.dateKey === selectedDate;
+            const eventCountForDate =
+              verifiedEventCountsByDate[calendarDay.dateKey] || 0;
+            const dateLabel = getDateDetails(calendarDay.dateKey).long;
+            const eventLabel = eventCountForDate
+              ? `${eventCountForDate} verified ${eventCountForDate === 1 ? "event" : "events"}`
+              : "no verified events";
+
+            return (
+              <button
+                type="button"
+                key={calendarDay.dateKey}
+                className={[
+                  isToday ? "today" : "",
+                  isSelected ? "selected" : "",
+                  eventCountForDate ? "has-events" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                disabled={isPast}
+                aria-current={isToday ? "date" : undefined}
+                aria-pressed={isSelected}
+                aria-label={`${dateLabel}, ${eventLabel}${isPast ? ", date has passed" : ""}`}
+                onClick={() => onDateChange(calendarDay.dateKey)}
+              >
+                {calendarDay.day}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <section className="rail-section weekend-list">
         <h2>This weekend</h2>
-        <div>
-          <strong>24</strong>
-          <span>Fri</span>
-        </div>
-        <div>
-          <strong>25</strong>
-          <span>Sat</span>
-        </div>
-        <div>
-          <strong>26</strong>
-          <span>Sun</span>
-        </div>
+        {weekendDates.map((weekendDate) => {
+          const isSelected = weekendDate.dateKey === selectedDate;
+          const isPast = weekendDate.dateKey < todayDateKey;
+          const eventCountForDate =
+            verifiedEventCountsByDate[weekendDate.dateKey] || 0;
+          return (
+            <button
+              type="button"
+              key={weekendDate.dateKey}
+              className={[
+                isSelected ? "selected" : "",
+                eventCountForDate ? "has-events" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              disabled={isPast}
+              aria-pressed={isSelected}
+              aria-label={`${getDateDetails(weekendDate.dateKey).long}, ${
+                eventCountForDate
+                  ? `${eventCountForDate} verified ${eventCountForDate === 1 ? "event" : "events"}`
+                  : "no verified events"
+              }${isPast ? ", date has passed" : ""}`}
+              onClick={() => onDateChange(weekendDate.dateKey)}
+            >
+              <strong>{weekendDate.day}</strong>
+              <span>{weekendDate.weekday}</span>
+            </button>
+          );
+        })}
       </section>
 
       <section className="rail-section nearby-list">
@@ -832,7 +1216,7 @@ function DateRail({ origin, eventCount, onOriginChange, onDataStatus }) {
         <CheckCircle size={20} weight="fill" aria-hidden="true" />
         <span>
           <strong>Catalog current</strong>
-          {eventCount} real events verified Jul 23
+          {eventCount} real events · {sourceCount} sources · {checkedLabel}
         </span>
         <CaretDown size={16} aria-hidden="true" />
       </button>
@@ -844,10 +1228,12 @@ export function App() {
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState("All");
-  const [costFilter, setCostFilter] = useState("Under $20");
+  const [costFilter, setCostFilter] = useState("Any cost");
   const [eligibilityFilter, setEligibilityFilter] =
     useState("Include unknown");
+  const [selectedDate, setSelectedDate] = useState(null);
   const [sortBy, setSortBy] = useState("best");
+  const [displayLimit, setDisplayLimit] = useState(18);
   const [origin, setOrigin] = useState(initialPreferences.origin);
   const [savedOnly, setSavedOnly] = useState(false);
   const [savedIds, setSavedIds] = useStoredArray("findr:saved");
@@ -862,6 +1248,8 @@ export function App() {
   const [session, setSession] = useState(null);
   const [sessionLoading, setSessionLoading] = useState(isSupabaseConfigured);
   const [guideMessages, setGuideMessages] = useState(initialGuideMessages);
+  const [guideProfile, setGuideProfile] = useState(initialGuideProfile);
+  const [guideIntake, setGuideIntake] = useState(initialGuideIntake);
   const [guideInput, setGuideInput] = useState("");
   const [guideLoading, setGuideLoading] = useState(false);
   const [guideStatus, setGuideStatus] = useState(initialGuideStatus);
@@ -869,15 +1257,22 @@ export function App() {
   const toastTimer = useRef(null);
   const guideAbortRef = useRef(null);
 
-  const preferences = {
+  const discoveryPreferences = {
     ...initialPreferences,
     origin,
   };
+  const selectedDateDetails = selectedDate
+    ? getDateDetails(selectedDate)
+    : null;
 
   const showToast = (message) => {
     window.clearTimeout(toastTimer.current);
     setToast(message);
     toastTimer.current = window.setTimeout(() => setToast(""), 3600);
+  };
+
+  const toggleSelectedDate = (dateKey) => {
+    setSelectedDate((current) => (current === dateKey ? null : dateKey));
   };
 
   useEffect(
@@ -927,6 +1322,7 @@ export function App() {
 
   const visibleEvents = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
+    const now = Date.now();
     const filtered = events.filter((event) => {
       const searchable = [
         event.title,
@@ -945,25 +1341,38 @@ export function App() {
       const matchesCost =
         costFilter === "Any cost" ||
         (costFilter === "Free only" && event.cost === 0) ||
-        (costFilter === "Under $20" && event.cost <= 20);
+        (costFilter === "Under $20" &&
+          Number.isFinite(event.cost) &&
+          event.cost <= 20);
       const matchesEligibility =
         eligibilityFilter === "Include unknown" ||
         event.eligibility === "confirmed";
+      const matchesDate =
+        !selectedDate ||
+        getLocalDateKey(new Date(event.startAt)) === selectedDate;
       const matchesSaved = !savedOnly || savedIds.includes(event.id);
       const notDismissed = !dismissedIds.includes(event.id);
+      const isCurrent = Date.parse(event.endAt) > now;
 
       return (
+        isCurrent &&
         matchesSearch &&
         matchesCategory &&
         matchesCost &&
         matchesEligibility &&
+        matchesDate &&
         matchesSaved &&
         notDismissed
       );
     });
 
     return [...filtered].sort((a, b) => {
-      if (sortBy === "price") return a.cost - b.cost;
+      if (sortBy === "price") {
+        if (a.cost === null && b.cost === null) return 0;
+        if (a.cost === null) return 1;
+        if (b.cost === null) return -1;
+        return a.cost - b.cost;
+      }
       if (sortBy === "eligibility") {
         return a.eligibility === b.eligibility
           ? 0
@@ -982,27 +1391,43 @@ export function App() {
     savedIds,
     savedOnly,
     searchQuery,
+    selectedDate,
     sortBy,
   ]);
+  const displayedEvents = visibleEvents.slice(0, displayLimit);
 
   useEffect(() => {
     const params = new URLSearchParams();
     if (searchQuery) params.set("q", searchQuery);
     if (category !== "All") params.set("category", category);
-    if (costFilter !== "Under $20") params.set("cost", costFilter);
+    if (costFilter !== "Any cost") params.set("cost", costFilter);
     if (eligibilityFilter !== "Include unknown") {
       params.set("age", "confirmed");
     }
+    if (selectedDate) params.set("date", selectedDate);
     const next = params.size ? `?${params.toString()}` : window.location.pathname;
     window.history.replaceState(null, "", next);
-  }, [category, costFilter, eligibilityFilter, searchQuery]);
+  }, [category, costFilter, eligibilityFilter, searchQuery, selectedDate]);
+
+  useEffect(() => {
+    setDisplayLimit(18);
+  }, [
+    category,
+    costFilter,
+    eligibilityFilter,
+    savedOnly,
+    searchQuery,
+    selectedDate,
+    sortBy,
+  ]);
 
   const resetFilters = () => {
     setSearchDraft("");
     setSearchQuery("");
     setCategory("All");
-    setCostFilter("Under $20");
+    setCostFilter("Any cost");
     setEligibilityFilter("Include unknown");
+    setSelectedDate(null);
     setSavedOnly(false);
     setDismissedIds([]);
     showToast("Discovery filters reset");
@@ -1078,6 +1503,8 @@ export function App() {
 
   const submitGuide = async (prompt) => {
     if (guideLoading) return;
+    const submittingIntake = !guideIntake.complete;
+    const currentProgress = getGuideProgress(guideProfile, guideIntake);
     const userMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -1086,7 +1513,16 @@ export function App() {
     setGuideMessages((current) => [...current, userMessage]);
     setGuideInput("");
     setGuideLoading(true);
-    setGuideStatus({ phase: "retrieving", text: "Searching verified events…" });
+    setGuideStatus(
+      submittingIntake
+        ? {
+            phase: "intake",
+            text: `Saving ${(
+              guideProfileFieldLabels[currentProgress.nextField] || "profile"
+            ).toLowerCase()}…`,
+          }
+        : { phase: "retrieving", text: "Searching verified events…" },
+    );
 
     const controller = new AbortController();
     guideAbortRef.current = controller;
@@ -1100,6 +1536,11 @@ export function App() {
             : [message.summary, message.caveat, message.question]
                 .filter(Boolean)
                 .join(" "),
+        ...(message.role === "assistant" &&
+        Array.isArray(message.eventIds) &&
+        message.eventIds.length
+          ? { eventIds: message.eventIds.slice(0, 4) }
+          : {}),
       }));
 
     try {
@@ -1107,7 +1548,7 @@ export function App() {
         {
           query: prompt,
           history,
-          preferences,
+          profile: guideProfile,
           visibleEventIds: visibleEvents.map((event) => event.id),
         },
         {
@@ -1133,10 +1574,35 @@ export function App() {
                 phase: "connecting",
                 text: `${status.providerLabel} did not finish; trying the next model…`,
               });
+            } else if (
+              submittingIntake &&
+              status.type === "answer" &&
+              status.provider === "intake"
+            ) {
+              setGuideStatus({
+                phase: "intake",
+                text: currentProgress.text,
+              });
             }
           },
         },
       );
+      const returnedProfile =
+        result.profile || result.doneMetadata?.profile || null;
+      const returnedIntake =
+        result.intake || result.doneMetadata?.intake || null;
+      const nextProfile = returnedProfile
+        ? { ...guideProfile, ...returnedProfile }
+        : guideProfile;
+      const nextIntake = returnedIntake
+        ? {
+            ...guideIntake,
+            ...returnedIntake,
+            suggestions: Array.isArray(returnedIntake.suggestions)
+              ? returnedIntake.suggestions
+              : [],
+          }
+        : guideIntake;
       const reply = {
         ...result.message,
         id: `assistant-${Date.now()}`,
@@ -1144,14 +1610,23 @@ export function App() {
         providerLabel: result.providerLabel,
         model: result.model,
       };
+      setGuideProfile(nextProfile);
+      setGuideIntake(nextIntake);
       setGuideMessages((current) => [...current, reply]);
-      setGuideStatus({
-        phase: result.provider === "local" ? "degraded" : "ready",
-        text:
-          result.provider === "local"
-            ? "Live providers were unavailable · verified retrieval used"
-            : `${result.providerLabel} · ${result.model}`,
-      });
+      if (nextIntake.complete) {
+        setGuideStatus({
+          phase: result.provider === "local" ? "degraded" : "ready",
+          text:
+            result.provider === "local"
+              ? "Live providers were unavailable · verified retrieval used"
+              : `${result.providerLabel} · ${result.model}`,
+        });
+      } else {
+        setGuideStatus({
+          phase: "intake",
+          text: getGuideProgress(nextProfile, nextIntake).text,
+        });
+      }
     } catch (error) {
       if (error.name !== "AbortError") {
         setGuideMessages((current) => [
@@ -1186,6 +1661,11 @@ export function App() {
     guideAbortRef.current = null;
     setGuideLoading(false);
     setGuideMessages(initialGuideMessages);
+    setGuideProfile({ ...initialGuideProfile });
+    setGuideIntake({
+      ...initialGuideIntake,
+      suggestions: [...initialGuideIntake.suggestions],
+    });
     setGuideInput("");
     setGuideStatus(initialGuideStatus);
     showToast("Findr guide reset");
@@ -1276,13 +1756,17 @@ export function App() {
         <DateRail
           origin={origin}
           eventCount={events.length}
+          sourceCount={catalogMeta.sources.length}
+          checkedLabel={latestCatalogCheck}
+          selectedDate={selectedDate}
+          onDateChange={toggleSelectedDate}
           onOriginChange={(nextOrigin) => {
             setOrigin(nextOrigin);
             showToast(`Travel origin changed to ${nextOrigin}`);
           }}
           onDataStatus={() =>
             showToast(
-              `All ${events.length} events link to source pages verified Jul 23, 2026`,
+              `${events.length} real events from ${catalogMeta.sources.length} current source feeds · synced ${latestCatalogCheck}`,
             )
           }
         />
@@ -1290,7 +1774,11 @@ export function App() {
         <main className="discover">
           <div className="discover-inner">
             <section className="discover-intro" aria-labelledby="discover-title">
-              <span className="mobile-date">Thu · Jul 23 · San Francisco</span>
+              <span className="mobile-date">
+                {selectedDateDetails
+                  ? `${selectedDateDetails.short} · San Francisco`
+                  : `${getDateDetails(todayDateKey).short} · Bay Area`}
+              </span>
               <h1 id="discover-title">
                 Your weekend, with the
                 <br />
@@ -1345,10 +1833,18 @@ export function App() {
                 <div>
                   <h2 id="results-heading">
                     {visibleEvents.length}{" "}
-                    {visibleEvents.length === 1 ? "verified event" : "verified events"}{" "}
-                    coming up
+                    {visibleEvents.length === 1
+                      ? "verified event"
+                      : "verified events"}{" "}
+                    {selectedDateDetails
+                      ? `on ${selectedDateDetails.long}`
+                      : "coming up"}
                   </h2>
-                  <span>Source-checked Jul 23 · Jul 24–Aug 20, 2026</span>
+                  <span>
+                    {selectedDateDetails
+                      ? `Synced ${latestCatalogCheck} · Date filter: ${selectedDateDetails.long}`
+                      : `Synced ${latestCatalogCheck} · ${catalogDateRange}`}
+                  </span>
                 </div>
 
                 <label className="sort-control">
@@ -1367,9 +1863,27 @@ export function App() {
               </div>
 
               <div className="active-constraints" aria-label="Active filters">
-                <button type="button" onClick={() => setFilterOpen(true)}>
+                <button
+                  className={
+                    selectedDate ? "date-constraint-selected" : undefined
+                  }
+                  type="button"
+                  aria-label={
+                    selectedDateDetails
+                      ? `Clear date filter for ${selectedDateDetails.long}`
+                      : "Open date and event filters"
+                  }
+                  onClick={() =>
+                    selectedDate
+                      ? setSelectedDate(null)
+                      : setFilterOpen(true)
+                  }
+                >
                   <CalendarBlank size={16} aria-hidden="true" />
-                  {preferences.date}
+                  {selectedDateDetails
+                    ? selectedDateDetails.short
+                    : discoveryPreferences.date}
+                  {selectedDate ? <X size={14} aria-hidden="true" /> : null}
                 </button>
                 <button type="button" onClick={() => setFilterOpen(true)}>
                   <CurrencyDollar size={16} aria-hidden="true" />
@@ -1395,7 +1909,7 @@ export function App() {
 
               <div className="event-list" aria-live="polite">
                 <AnimatePresence initial={false} mode="popLayout">
-                  {visibleEvents.map((event, index) => (
+                  {displayedEvents.map((event, index) => (
                     <EventRow
                       key={event.id}
                       event={event}
@@ -1413,17 +1927,37 @@ export function App() {
                 {!visibleEvents.length ? (
                   <EmptyState
                     savedOnly={savedOnly}
+                    selectedDateLabel={selectedDateDetails?.long}
+                    onShowAllDates={() => setSelectedDate(null)}
                     onReset={resetFilters}
                     onOpenGuide={() => setGuideOpen(true)}
                   />
                 ) : null}
               </div>
 
+              {displayedEvents.length < visibleEvents.length ? (
+                <button
+                  className="load-more-events"
+                  type="button"
+                  onClick={() =>
+                    setDisplayLimit((current) =>
+                      Math.min(current + 18, visibleEvents.length),
+                    )
+                  }
+                >
+                  Show 18 more
+                  <span>
+                    {displayedEvents.length} of {visibleEvents.length}
+                  </span>
+                </button>
+              ) : null}
+
               <div className="results-footnote">
                 <Database size={17} weight="bold" aria-hidden="true" />
                 <p>
-                  Every result links to its canonical Luma page. This is a
-                  verified snapshot, so recheck the organizer before attending.
+                  Every result is a real source record with a direct organizer
+                  link. The committed snapshot refreshes from official open
+                  data and RSS feeds; recheck the organizer before attending.
                 </p>
                 {dismissedIds.length ? (
                   <button
@@ -1461,7 +1995,8 @@ export function App() {
               loading={guideLoading}
               status={guideStatus}
               eventCount={events.length}
-              preferences={preferences}
+              profile={guideProfile}
+              intake={guideIntake}
               onSubmit={submitGuide}
               onPrompt={submitGuide}
               onOpenEvent={openEvent}
@@ -1501,7 +2036,8 @@ export function App() {
               loading={guideLoading}
               status={guideStatus}
               eventCount={events.length}
-              preferences={preferences}
+              profile={guideProfile}
+              intake={guideIntake}
               onSubmit={submitGuide}
               onPrompt={submitGuide}
               onOpenEvent={(event) => {
@@ -1538,6 +2074,12 @@ export function App() {
         onOpenChange={setAuthOpen}
         session={session}
         sessionLoading={sessionLoading}
+        onAccountDeleted={() => {
+          setSavedIds([]);
+          setDismissedIds([]);
+          setLastDismissed(null);
+          showToast("Account deleted");
+        }}
       />
 
       <AnimatePresence>

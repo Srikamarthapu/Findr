@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-07-28T18:27:56.364Z",
+  "recordCount": 86,
+  "firstEventAt": "2026-07-28T16:30:00.000Z",
+  "lastEventAt": "2026-08-21T01:30:00.000Z",
+  "sources": [
+    {
+      "name": "DataSF Our415 · daily open data",
+      "href": "https://data.sfgov.org/Economy-and-Community/Our415-Events-and-Activities/8i3s-ih2a",
+      "type": "open-data",
+      "count": 32,
+      "checkedAt": "2026-07-28T18:27:56.364Z",
+      "dataAt": "2026-07-28T00:00:00.000"
+    },
+    {
+      "name": "Luma San Francisco · official city iCal",
+      "href": "https://luma.com/sf",
+      "type": "ical",
+      "count": 20,
+      "checkedAt": "2026-07-28T18:27:56.364Z",
+      "dataAt": "2026-07-28T18:27:56.000Z"
+    },
+    {
+      "name": "Organizer-hosted Luma event page",
+      "href": "https://luma.com/jul-ai-forum",
+      "type": "curated",
+      "count": 6,
+      "checkedAt": "2026-07-28T18:27:56.364Z",
+      "dataAt": "2026-07-28T18:27:56.364Z"
+    },
+    {
+      "name": "Palo Alto City Library · official event RSS",
+      "href": "https://paloalto.bibliocommons.com/events",
+      "type": "rss",
+      "count": 14,
+      "checkedAt": "2026-07-28T18:27:56.364Z",
+      "dataAt": "Tue, 28 Jul 2026 18:27:57 GMT"
+    },
+    {
+      "name": "SF Rec Park · official calendar RSS",
+      "href": "https://www.sfrecpark.org/rss.aspx",
+      "type": "rss",
+      "count": 14,
+      "checkedAt": "2026-07-28T18:27:56.364Z",
+      "dataAt": "Tue, 28 Jul 2026 11:27:56 -0800"
+    }
+  ],
+  "warnings": [],
+  "contract": {
+    "mockRecordsAllowed": false,
+    "directEventLinksRequired": true,
+    "eligibilityTagsAreHints": true,
+    "committedSnapshotFallback": true
+  }
+}

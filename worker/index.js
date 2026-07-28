@@ -1,5 +1,10 @@
+import { handleApiRequest } from "../server/worker-api.mjs";
+
 export default {
   async fetch(request, env) {
+    const apiResponse = await handleApiRequest(request, env);
+    if (apiResponse) return apiResponse;
+
     const response = await env.ASSETS.fetch(request);
     const acceptsHtml = request.headers.get("accept")?.includes("text/html");
 

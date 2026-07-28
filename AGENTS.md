@@ -15,8 +15,13 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Keep the product professional and calm: deep ink navy, mineral white, restrained teal/sage, and brick only for dates or uncertainty.
 - Avoid neon, arcade typography, leaderboard cues, HUD styling, glow, and other gamified treatments.
 - Prioritize scanability, honest eligibility states, source freshness, visible focus, and simple navigation.
+- The guide must begin with conversational profile intake and collect age, interests, travel area or city, availability, and budget before it retrieves or recommends events. Greetings and incomplete profiles must never trigger recommendations.
+- Account deletion must be a real, irreversible Supabase Auth deletion performed server-side after re-verifying the current session. Never expose the service-role key or accept a user ID from the browser.
+- Treat the editorial calendar rail as navigation, not decoration: users must be able to select a date, see only events on that date, understand dates with verified events, and clear the date filter.
 - Use real Supabase Auth for account creation and sign-in; never present simulated authentication as live.
 - Show only source-verified real events with direct, event-specific organizer links; never mix mock records into the visible catalog.
+- Build the catalog from refreshable official open-data or RSS sources, normalize and deduplicate every record, retain provenance and freshness, and commit a verified snapshot so the demo never falls back to mock data when a feed is unavailable.
+- Make Bay Area AI and startup gatherings a first-class discovery lane: prioritize hackathons, founder and builder meetups, research talks, workshops, demo nights, and technical networking from supported official feeds or organizer pages. Do not scrape Luma Discover or Cerebral Valley HTML.
 - Keep organizer age policies unknown unless a source explicitly confirms them, even when an event mentions students.
 - Keep AI provider keys server-only in ignored environment files and expose provider/model status without exposing credentials.
 - Let users close and reopen the Findr concierge without losing the current conversation.

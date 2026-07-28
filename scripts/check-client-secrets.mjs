@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const secretNames = [
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_SECRET_KEY",
   "NVIDIA_NIM_API_KEY",
   "ZAI_API_KEY",
   "DEEPSEEK_API_KEY",
@@ -69,5 +71,5 @@ if (leaks.length) {
   }
   process.exitCode = 1;
 } else {
-  console.log("No configured provider credentials were found in dist/client.");
+  console.log("No configured server credentials were found in dist/client.");
 }

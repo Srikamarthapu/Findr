@@ -1,5 +1,11 @@
-import { catalogSummary } from "./catalog.mjs";
+import { catalogHealth } from "./catalog-health.mjs";
 import { runGuide } from "./guide-service.mjs";
+import {
+  utf8ByteLength,
+  validateGuideRequest,
+} from "./guide-request.mjs";
+
+export { validateGuideRequest } from "./guide-request.mjs";
 
 const MAX_BODY_BYTES = 32_768;
 const RATE_WINDOW_MS = 60_000;
@@ -18,23 +24,11 @@ async function readJsonBody(request) {
   let body = "";
   for await (const chunk of request) {
     body += chunk;
-    if (Buffer.byteLength(body) > MAX_BODY_BYTES) {
+    if (utf8ByteLength(body) > MAX_BODY_BYTES) {
       throw new Error("body_too_large");
     }
   }
   return JSON.parse(body);
-}
-
-function validRequestBody(value) {
-  return (
-    value &&
-    typeof value === "object" &&
-    typeof value.query === "string" &&
-    value.query.trim().length >= 1 &&
-    value.query.length <= 800 &&
-    (!value.history || Array.isArray(value.history)) &&
-    (!value.visibleEventIds || Array.isArray(value.visibleEventIds))
-  );
 }
 
 function isAllowedOrigin(request) {
@@ -72,11 +66,7 @@ export function findrGuidePlugin({ env = {} } = {}) {
           }
           sendJson(response, 200, {
             status: "ok",
-            catalog: {
-              count: catalogSummary().length,
-              verifiedAt: "2026-07-23",
-              source: "Luma",
-            },
+            catalog: catalogHealth(),
             providers: {
               nvidia: Boolean(env.NVIDIA_NIM_API_KEY),
               zai: Boolean(env.ZAI_API_KEY),
@@ -133,7 +123,7 @@ export function findrGuidePlugin({ env = {} } = {}) {
           });
           return;
         }
-        if (!validRequestBody(payload)) {
+        if (!validateGuideRequest(payload)) {
           sendJson(response, 400, { error: "invalid_request" });
           return;
         }
@@ -161,12 +151,13 @@ export function findrGuidePlugin({ env = {} } = {}) {
         try {
           const result = await runGuide({
             query: payload.query.trim(),
+            profile: payload.profile || {},
             preferences: payload.preferences || {},
             history: Array.isArray(payload.history)
               ? payload.history.slice(-8)
               : [],
             visibleEventIds: Array.isArray(payload.visibleEventIds)
-              ? payload.visibleEventIds.slice(0, 24)
+              ? payload.visibleEventIds.slice(0, 100)
               : undefined,
             env,
             signal: controller.signal,
@@ -178,6 +169,8 @@ export function findrGuidePlugin({ env = {} } = {}) {
             providerLabel: result.providerLabel,
             model: result.model,
             attempts: result.attempts,
+            profile: result.profile,
+            intake: result.intake,
           });
         } catch {
           if (!controller.signal.aborted) {
