@@ -543,7 +543,7 @@ function EmptyState({
   );
 }
 
-function GuideMessage({ message, onOpenEvent }) {
+function GuideMessage({ message, onOpenEvent, onShowEvents }) {
   if (message.role === "user") {
     return (
       <div className="guide-message user-message">
@@ -568,28 +568,38 @@ function GuideMessage({ message, onOpenEvent }) {
         <p>{message.summary}</p>
 
         {groundedEvents.length > 0 ? (
-          <ol className="guide-event-list">
-            {groundedEvents.map((event) => (
-              <li key={event.id}>
-                <button type="button" onClick={() => onOpenEvent(event)}>
-                  <span className="guide-event-title">{event.shortTitle}</span>
-                  <span>
-                    {event.dateLabel} · {event.time.split("–")[0]} ·{" "}
-                    {event.neighborhood}
-                  </span>
-                  <span
-                    className={
-                      event.eligibility === "unknown"
-                        ? "guide-unknown"
-                        : "guide-confirmed"
-                    }
-                  >
-                    {event.eligibilityLabel}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ol>
+          <>
+            <ol className="guide-event-list">
+              {groundedEvents.map((event) => (
+                <li key={event.id}>
+                  <button type="button" onClick={() => onOpenEvent(event)}>
+                    <span className="guide-event-title">{event.shortTitle}</span>
+                    <span>
+                      {event.dateLabel} · {event.time.split("–")[0]} ·{" "}
+                      {event.neighborhood}
+                    </span>
+                    <span
+                      className={
+                        event.eligibility === "unknown"
+                          ? "guide-unknown"
+                          : "guide-confirmed"
+                      }
+                    >
+                      {event.eligibilityLabel}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+            <button
+              className="guide-show-events"
+              type="button"
+              onClick={() => onShowEvents(groundedEvents)}
+            >
+              <span>Show these on the event page</span>
+              <ArrowRight size={16} weight="bold" aria-hidden="true" />
+            </button>
+          </>
         ) : null}
 
         {message.caveat ? (
@@ -624,6 +634,7 @@ function GuidePanel({
   onSubmit,
   onPrompt,
   onOpenEvent,
+  onShowEvents,
   onReset,
   onClose,
 }) {
@@ -690,6 +701,7 @@ function GuidePanel({
             key={message.id}
             message={message}
             onOpenEvent={onOpenEvent}
+            onShowEvents={onShowEvents}
           />
         ))}
 
@@ -1253,9 +1265,11 @@ export function App() {
   const [guideInput, setGuideInput] = useState("");
   const [guideLoading, setGuideLoading] = useState(false);
   const [guideStatus, setGuideStatus] = useState(initialGuideStatus);
+  const [guideResultIds, setGuideResultIds] = useState(null);
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
   const guideAbortRef = useRef(null);
+  const guideInFlightRef = useRef(false);
 
   const discoveryPreferences = {
     ...initialPreferences,
@@ -1351,6 +1365,8 @@ export function App() {
         !selectedDate ||
         getLocalDateKey(new Date(event.startAt)) === selectedDate;
       const matchesSaved = !savedOnly || savedIds.includes(event.id);
+      const matchesGuideResults =
+        !guideResultIds || guideResultIds.includes(event.id);
       const notDismissed = !dismissedIds.includes(event.id);
       const isCurrent = Date.parse(event.endAt) > now;
 
@@ -1362,6 +1378,7 @@ export function App() {
         matchesEligibility &&
         matchesDate &&
         matchesSaved &&
+        matchesGuideResults &&
         notDismissed
       );
     });
@@ -1393,6 +1410,7 @@ export function App() {
     searchQuery,
     selectedDate,
     sortBy,
+    guideResultIds,
   ]);
   const displayedEvents = visibleEvents.slice(0, displayLimit);
 
@@ -1419,6 +1437,7 @@ export function App() {
     searchQuery,
     selectedDate,
     sortBy,
+    guideResultIds,
   ]);
 
   const resetFilters = () => {
@@ -1428,6 +1447,7 @@ export function App() {
     setCostFilter("Any cost");
     setEligibilityFilter("Include unknown");
     setSelectedDate(null);
+    setGuideResultIds(null);
     setSavedOnly(false);
     setDismissedIds([]);
     showToast("Discovery filters reset");
@@ -1502,7 +1522,8 @@ export function App() {
   };
 
   const submitGuide = async (prompt) => {
-    if (guideLoading) return;
+    if (guideLoading || guideInFlightRef.current) return;
+    guideInFlightRef.current = true;
     const submittingIntake = !guideIntake.complete;
     const currentProgress = getGuideProgress(guideProfile, guideIntake);
     const userMessage = {
@@ -1612,7 +1633,16 @@ export function App() {
       };
       setGuideProfile(nextProfile);
       setGuideIntake(nextIntake);
-      setGuideMessages((current) => [...current, reply]);
+      setGuideMessages((current) => {
+        const previous = current.at(-1);
+        const duplicate =
+          previous?.role === "assistant" &&
+          previous.summary === reply.summary &&
+          previous.question === reply.question &&
+          JSON.stringify(previous.eventIds || []) ===
+            JSON.stringify(reply.eventIds || []);
+        return duplicate ? current : [...current, reply];
+      });
       if (nextIntake.complete) {
         setGuideStatus({
           phase: result.provider === "local" ? "degraded" : "ready",
@@ -1652,6 +1682,7 @@ export function App() {
       if (guideAbortRef.current === controller) {
         guideAbortRef.current = null;
       }
+      guideInFlightRef.current = false;
       setGuideLoading(false);
     }
   };
@@ -1668,7 +1699,30 @@ export function App() {
     });
     setGuideInput("");
     setGuideStatus(initialGuideStatus);
+    setGuideResultIds(null);
     showToast("Findr guide reset");
+  };
+
+  const showGuideEvents = (recommendedEvents) => {
+    const ids = recommendedEvents.map((event) => event.id);
+    if (!ids.length) return;
+    setGuideResultIds(ids);
+    setSearchDraft("");
+    setSearchQuery("");
+    setCategory("All");
+    setCostFilter("Any cost");
+    setEligibilityFilter("Include unknown");
+    setSelectedDate(null);
+    setSavedOnly(false);
+    setDisplayLimit(ids.length);
+    setGuideOpen(false);
+    setGuideDesktopOpen(false);
+    showToast(`Showing ${ids.length} guide ${ids.length === 1 ? "pick" : "picks"}`);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById("discover-results")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   };
 
   return (
@@ -1905,6 +1959,17 @@ export function App() {
                     <X size={14} aria-hidden="true" />
                   </button>
                 ) : null}
+                {guideResultIds?.length ? (
+                  <button
+                    type="button"
+                    onClick={() => setGuideResultIds(null)}
+                    aria-label="Clear guide event picks"
+                  >
+                    <Sparkle size={16} weight="fill" aria-hidden="true" />
+                    Guide picks
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                ) : null}
               </div>
 
               <div className="event-list" aria-live="polite">
@@ -2000,6 +2065,7 @@ export function App() {
               onSubmit={submitGuide}
               onPrompt={submitGuide}
               onOpenEvent={openEvent}
+              onShowEvents={showGuideEvents}
               onReset={resetGuide}
               onClose={() => setGuideDesktopOpen(false)}
             />
@@ -2044,6 +2110,7 @@ export function App() {
                 setGuideOpen(false);
                 openEvent(event);
               }}
+              onShowEvents={showGuideEvents}
               onReset={resetGuide}
               onClose={() => setGuideOpen(false)}
             />

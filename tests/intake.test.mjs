@@ -76,6 +76,19 @@ test("Hello gets a live conversational reply, asks for age, and never retrieves"
   ]);
 });
 
+test("Hello stays welcoming when live providers are unavailable", async () => {
+  const result = await runGuide({
+    query: "hello",
+    profile: emptyProfile,
+    providerChainImpl: () => [],
+  });
+
+  assert.equal(result.provider, "intake");
+  assert.match(result.message.summary, /^Hi!/);
+  assert.match(result.message.question, /how old|age/i);
+  assert.deepEqual(result.message.eventIds, []);
+});
+
 test("natural age variants advance to interests without recommendations", async () => {
   const variants = [
     "Im 16",

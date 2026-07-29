@@ -26,3 +26,4 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Keep organizer age policies unknown unless a source explicitly confirms them, even when an event mentions students.
 - Keep AI provider keys server-only in ignored environment files and expose provider/model status without exposing credentials.
 - Let users close and reopen the Findr concierge without losing the current conversation.
+- Keep the concierge welcoming for brief event-related greetings and small talk while still requiring the profile before recommendations. After grounded recommendations, offer a clear action to show the same verified events as interactive cards in the main event catalog.

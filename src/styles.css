@@ -1315,6 +1315,30 @@ a {
   font-weight: 700;
 }
 
+.guide-show-events {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  width: 100%;
+  min-height: 38px;
+  margin: 2px 0 4px;
+  padding: 7px 10px;
+  color: var(--teal-dark);
+  background: var(--sage);
+  border: 1px solid var(--sage-strong);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.guide-show-events:hover {
+  color: var(--white);
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
 .guide-caveat {
   display: flex;
   align-items: flex-start;

@@ -142,6 +142,28 @@ function isEventDiscoveryRequest(query, history) {
   return wordCount <= 8 && topicPattern.test(normalized);
 }
 
+function isFriendlyOpening(query) {
+  const normalized = String(query ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "");
+  return /^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening|thanks|thank you)(?: there)?$/.test(
+    normalized,
+  );
+}
+
+function friendlyOpeningAnswer(intake) {
+  return {
+    role: "assistant",
+    summary:
+      "Hi! I can help you find real events around the Bay Area and keep the search focused on what sounds good to you.",
+    eventIds: [],
+    caveat: null,
+    question: intakeQuestion(intake),
+    noMatch: false,
+  };
+}
+
 async function runProviderCascade({
   messages,
   validate,
@@ -378,10 +400,12 @@ export async function runGuide({
           provider: "intake",
           providerLabel: "Findr profile intake",
           model: "deterministic",
-          message: intakeAnswer(intakeState.profile, intakeState.intake, {
-            query,
-            fieldsCapturedThisTurn,
-          }),
+          message: isFriendlyOpening(query)
+            ? friendlyOpeningAnswer(intakeState.intake)
+            : intakeAnswer(intakeState.profile, intakeState.intake, {
+                query,
+                fieldsCapturedThisTurn,
+              }),
           attempts: live.attempts,
         };
     emitAnswer(emit, result, intakeState.profile, intakeState.intake);
