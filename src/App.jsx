@@ -2050,6 +2050,17 @@ export function App() {
           </button>
         </main>
 
+        {!guideDesktopOpen ? (
+          <button
+            className="desktop-guide-tab"
+            type="button"
+            onClick={() => setGuideDesktopOpen(true)}
+          >
+            <ChatCircleDots size={20} weight="bold" aria-hidden="true" />
+            Open Findr guide
+          </button>
+        ) : null}
+
         {guideDesktopOpen ? (
           <aside className="guide-desktop">
             <GuidePanel

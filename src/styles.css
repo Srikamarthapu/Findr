@@ -23,8 +23,10 @@
   --teal-pale: #dcebea;
   --sage: #e9efe5;
   --sage-strong: #b9cdb7;
-  --brick: #c95d4b;
-  --brick-pale: #f4dfd8;
+  --brick: #8a6a14;
+  --brick-pale: #f3e8b8;
+  --warm-accent: #ffd23f;
+  --warm-border: #ffe889;
   --blue: #2b628a;
   --blue-pale: #e4eef4;
   --muted: #637078;
@@ -133,17 +135,14 @@ a {
 
 .app-shell {
   display: grid;
-  grid-template-columns:
-    var(--rail-width)
-    minmax(620px, 1fr)
-    var(--guide-width);
+  grid-template-columns: var(--rail-width) minmax(620px, 1fr);
   grid-template-rows: var(--topbar-height) minmax(
       calc(100dvh - var(--topbar-height)),
       auto
     );
   grid-template-areas:
-    "header header header"
-    "rail main guide";
+    "header header"
+    "rail main";
   min-height: 100dvh;
 }
 
@@ -315,7 +314,7 @@ a {
 
 .today-block strong {
   margin: 2px 0 -4px;
-  color: var(--brick);
+  color: var(--warm-accent);
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 76px;
   font-weight: 500;
@@ -324,7 +323,7 @@ a {
 }
 
 .today-block em {
-  color: var(--brick);
+  color: var(--warm-accent);
   font-size: 14px;
 }
 
@@ -436,9 +435,9 @@ a {
 }
 
 .calendar-days button.today {
-  color: var(--white);
-  background: var(--brick);
-  border-color: #c48170;
+  color: var(--ink-strong);
+  background: var(--warm-accent);
+  border-color: var(--warm-border);
   font-weight: 700;
 }
 
@@ -451,8 +450,8 @@ a {
 }
 
 .calendar-days button.today.selected {
-  color: var(--white);
-  background: var(--brick);
+  color: var(--ink-strong);
+  background: var(--warm-accent);
   border-color: #9ed0c7;
   box-shadow: 0 0 0 1px #9ed0c7;
 }
@@ -1129,13 +1128,17 @@ a {
 }
 
 .guide-desktop {
-  position: sticky;
-  top: var(--topbar-height);
-  grid-area: guide;
-  align-self: start;
-  height: calc(100dvh - var(--topbar-height));
-  min-height: 680px;
-  border-left: 1px solid var(--line-strong);
+  position: fixed;
+  z-index: 70;
+  right: 22px;
+  bottom: 22px;
+  width: min(var(--guide-width), calc(100vw - 44px));
+  height: min(680px, calc(100dvh - 110px));
+  min-height: 440px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: 0 18px 44px rgb(7 27 43 / 22%);
 }
 
 .guide-panel {
@@ -1144,6 +1147,29 @@ a {
   min-height: 0;
   flex-direction: column;
   background: var(--paper);
+  border-radius: 8px;
+}
+
+.desktop-guide-tab {
+  position: fixed;
+  z-index: 70;
+  right: 22px;
+  bottom: 22px;
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 15px;
+  color: var(--white);
+  background: var(--teal);
+  border: 1px solid var(--teal-dark);
+  border-radius: 25px;
+  box-shadow: 0 12px 28px rgb(7 27 43 / 22%);
+  font-weight: 760;
+}
+
+.desktop-guide-tab:hover {
+  background: var(--teal-dark);
 }
 
 .guide-header {
@@ -1236,8 +1262,8 @@ a {
 }
 
 .assistant-card.no-match {
-  background: #fbf3ee;
-  border-color: #d9a99d;
+  background: var(--brick-pale);
+  border-color: var(--warm-border);
 }
 
 .assistant-card > p {
@@ -2395,6 +2421,10 @@ a {
   }
 
   .guide-desktop {
+    display: none;
+  }
+
+  .desktop-guide-tab {
     display: none;
   }
 

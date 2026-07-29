@@ -494,7 +494,7 @@ export function intakeQuestion(intake) {
   const copy = INTAKE_COPY[intake.nextField];
   const needsAge = intake.nextField === "age";
   return needsAge
-    ? "How old are you? Enter an age from 13 to 120, for example “I’m 16.”"
+    ? "How old are you? Enter an age, for example “I’m 19.”"
     : copy.question;
 }
 

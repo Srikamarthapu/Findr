@@ -132,7 +132,7 @@ test("an invalid age gets a brief correction and remains bounded", async () => {
   assert.equal(result.profile.age, null);
   assert.deepEqual(result.message.eventIds, []);
   assert.match(result.message.summary, /didn.t catch a valid age/i);
-  assert.match(result.message.question, /13 to 120/);
+  assert.match(result.message.question, /enter an age|I’m 19/i);
   assert.doesNotMatch(result.message.summary, /five quick questions/i);
 });
 
